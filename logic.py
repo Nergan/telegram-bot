@@ -3,18 +3,18 @@ from json import load, dump, JSONDecodeError
 
 from llama_cpp import Llama
 
-from config import N_CTX, TEMPARETURE, FREE_TOKENS
+from config import N_CTX, TEMPARETURE, FREE_TOKENS, MODEL_PATH, PROMPT_PATH, DB_PATH
 
 
 model = Llama(
-    model_path="<model path>.gguf",
+    model_path=MODEL_PATH,
     n_ctx=N_CTX,
     verbose=False,
     temperature=TEMPARETURE
 )
 
         
-def get_starter_prompt(filename='<prompt path>.txt'):
+def get_starter_prompt(filename=PROMPT_PATH):
     with open(filename, encoding='utf-8') as file:
         starter_prompt = f'{file.read().encode('utf-8').decode('unicode_escape')}\n\n'
     return starter_prompt
@@ -30,18 +30,18 @@ def get_tokens(msg, model=model):
     return len(model.tokenize(history.encode("utf-8"), add_bos=False))
 
 
-def read_data(filename='data.json'):
-    with open('data.json', encoding='utf-8') as file:
+def read_data(filename=DB_PATH):
+    with open(DB_PATH, encoding='utf-8') as file:
         try: data = load(file)
         except JSONDecodeError: data = {}
     return data
 
-def write_data(data, filename='data.json'):
-    with open('data.json', 'w', encoding='utf-8') as file:
+def write_data(data, filename=DB_PATH):
+    with open(DB_PATH, 'w', encoding='utf-8') as file:
         dump(data, file, ensure_ascii=False, indent=4)
         
 
-def upd_names(msg, bot_old, user_old, bot_new, user_new, filename='data.json'):
+def upd_names(msg, bot_old, user_old, bot_new, user_new, filename=DB_PATH):
     userid, username = str(msg.from_user.id), msg.from_user.username
     data = read_data()
     
@@ -74,14 +74,14 @@ def trim_history(msg, model=model):
         
         write_data(data)
     
-def add_history(msg, content, trim=True, model=model, filename='data.json'):
+def add_history(msg, content, trim=True, model=model, filename=DB_PATH):
     userid, username = str(msg.from_user.id), msg.from_user.username
     data = read_data()
     data[userid][username]['history'].append(content)
     write_data(data)
     if trim: trim_history(msg)
     
-def add_log(msg, role, content, filename='data.json'):
+def add_log(msg, role, content, filename=DB_PATH):
     userid, username = str(msg.from_user.id), msg.from_user.username
     data = read_data()
     data[userid][username]['log'].append({
@@ -91,7 +91,7 @@ def add_log(msg, role, content, filename='data.json'):
     })
     write_data(data)
     
-def add_data(msg, role, content, filename='data.json'):
+def add_data(msg, role, content, filename=DB_PATH):
     userid, username = str(msg.from_user.id), msg.from_user.username
     
     data = read_data()
