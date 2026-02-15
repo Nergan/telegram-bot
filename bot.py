@@ -6,7 +6,7 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
 from aiogram.enums import ChatAction
 
-from config import TOKEN # файл с Вашем токеном
+from config import TOKEN, MAX_TOKENS
 from logic import (
     add_data,
     read_data,
@@ -120,7 +120,7 @@ async def msg(msg: Message):
         history = get_history(msg)
         answer = model(
             f'{history}{botalias}:',
-            max_tokens=120,
+            max_tokens=MAX_TOKENS,
             echo=False,
             stop=[f'{useralias}: ', f'{botalias}: ']
         )["choices"][0]["text"]

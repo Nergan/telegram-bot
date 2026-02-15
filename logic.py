@@ -3,12 +3,14 @@ from json import load, dump, JSONDecodeError
 
 from llama_cpp import Llama
 
+from config import N_CTX, TEMPARETURE, FREE_TOKENS
+
 
 model = Llama(
     model_path="<model path>.gguf",
-    n_ctx=1024,
+    n_ctx=N_CTX,
     verbose=False,
-    temperature=0.85
+    temperature=TEMPARETURE
 )
 
         
@@ -58,7 +60,7 @@ def upd_names(msg, bot_old, user_old, bot_new, user_new, filename='data.json'):
     write_data(data)
     
 def trim_history(msg, model=model):
-    limit = model.n_ctx() - 256
+    limit = model.n_ctx() - FREE_TOKENS
     if get_tokens(msg, model) > limit:
         userid, username = str(msg.from_user.id), msg.from_user.username
         data = read_data()
