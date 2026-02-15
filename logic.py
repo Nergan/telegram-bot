@@ -3,7 +3,7 @@ from json import load, dump, JSONDecodeError
 
 from llama_cpp import Llama
 
-from config import N_CTX, TEMPARETURE, FREE_TOKENS, MODEL_PATH, PROMPT_PATH, DB_PATH
+from config import N_CTX, TEMPARETURE, FREE_TOKENS, MODEL_PATH, STARTER_PROMPT_PATH, DB_PATH
 
 
 model = Llama(
@@ -14,7 +14,7 @@ model = Llama(
 )
 
         
-def get_starter_prompt(filename=PROMPT_PATH):
+def get_starter_prompt(filename=STARTER_PROMPT_PATH):
     with open(filename, encoding='utf-8') as file:
         starter_prompt = f'{file.read().encode('utf-8').decode('unicode_escape')}\n\n'
     return starter_prompt
