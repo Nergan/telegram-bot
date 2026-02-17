@@ -1,10 +1,19 @@
 from datetime import datetime
-from json import load, dump, JSONDecodeError
+from os import getenv
 
+from dotenv import load_dotenv
 from llama_cpp import Llama
+from motor.motor_asyncio import AsyncIOMotorClient
 
-from config import N_CTX, TEMPARETURE, FREE_TOKENS, MODEL_PATH, STARTER_PROMPT_PATH, DB_PATH
+from config import N_CTX, TEMPARETURE, MAX_TOKENS, MODEL_PATH, STARTER_PROMPT_PATH
 
+
+load_dotenv()
+
+MONGO_URL = getenv("MONGODB_URI", "mongodb://localhost:27017")
+client = AsyncIOMotorClient(MONGO_URL, tls=True, tlsAllowInvalidCertificates=True)
+db = client["bot"]
+users_collection = db["users"]
 
 model = Llama(
     model_path=MODEL_PATH,
@@ -13,104 +22,160 @@ model = Llama(
     temperature=TEMPARETURE
 )
 
-        
+
 def get_starter_prompt(filename=STARTER_PROMPT_PATH):
     with open(filename, encoding='utf-8') as file:
         starter_prompt = f'{file.read().encode('utf-8').decode('unicode_escape')}\n\n'
     return starter_prompt
 
-def get_history(msg):
-    userid, username = str(msg.from_user.id), msg.from_user.username
-    data = read_data()
-    history = ''.join(data[userid][username]['history'])   
-    return history
 
-def get_tokens(msg, model=model):
-    history = get_history(msg)
+async def get_history(msg):
+    user_id = str(msg.from_user.id)
+    username = msg.from_user.username
+    doc = await users_collection.find_one({"user_id": user_id, "username": username})
+    if doc:
+        return ''.join(doc.get('history', []))
+    return ''
+
+
+async def get_tokens(msg, model=model):
+    history = await get_history(msg)
     return len(model.tokenize(history.encode("utf-8"), add_bos=False))
 
 
-def read_data(filename=DB_PATH):
-    with open(DB_PATH, encoding='utf-8') as file:
-        try: data = load(file)
-        except JSONDecodeError: data = {}
-    return data
+async def get_user_alias(msg):
+    user_id = str(msg.from_user.id)
+    username = msg.from_user.username
+    doc = await users_collection.find_one({"user_id": user_id, "username": username})
+    if doc:
+        return doc.get('user_alias', msg.from_user.first_name)
+    return msg.from_user.first_name
 
-def write_data(data, filename=DB_PATH):
-    with open(DB_PATH, 'w', encoding='utf-8') as file:
-        dump(data, file, ensure_ascii=False, indent=4)
-        
 
-def upd_names(msg, bot_old, user_old, bot_new, user_new, filename=DB_PATH):
-    userid, username = str(msg.from_user.id), msg.from_user.username
-    data = read_data()
-    
-    data[userid][username]['bot alias'] = bot_new
-    data[userid][username]['user alias'] = user_new
-    starter_prompt = data[userid][username]['history'][0]
-    starter_prompt = starter_prompt.replace(bot_old, bot_new)
-    starter_prompt = starter_prompt.replace(user_old, user_new)
-    data[userid][username]['history'][0] = starter_prompt
-    
-    for i, story in enumerate(data[userid][username]['history']):
-        if i == 0: continue
-        if f'{bot_old}: ' in story: data[userid][username]['history'][i] = story.replace(f'{bot_old}: ', f'{bot_new}: ')
-        elif f'{user_old}: ' in story: data[userid][username]['history'][i] = story.replace(f'{user_old}: ', f'{user_new}: ')
-        
-    write_data(data)
-    
-def trim_history(msg, model=model):
-    limit = model.n_ctx() - FREE_TOKENS
-    if get_tokens(msg, model) > limit:
-        userid, username = str(msg.from_user.id), msg.from_user.username
-        data = read_data()
-        
-        new_history = [data[userid][username]['history'][0]]
-        for story in reversed(data[userid][username]['history'][1:]):
-            if len(model.tokenize(''.join(new_history + [story]).encode("utf-8"), add_bos=False)) > limit:
-                break
-            new_history.insert(1, story)
-        data[userid][username]['history'] = new_history
-        
-        write_data(data)
-    
-def add_history(msg, content, trim=True, model=model, filename=DB_PATH):
-    userid, username = str(msg.from_user.id), msg.from_user.username
-    data = read_data()
-    data[userid][username]['history'].append(content)
-    write_data(data)
-    if trim: trim_history(msg)
-    
-def add_log(msg, role, content, filename=DB_PATH):
-    userid, username = str(msg.from_user.id), msg.from_user.username
-    data = read_data()
-    data[userid][username]['log'].append({
+async def get_bot_alias(msg):
+    user_id = str(msg.from_user.id)
+    username = msg.from_user.username
+    doc = await users_collection.find_one({"user_id": user_id, "username": username})
+    if doc:
+        return doc.get('bot_alias', 'Mistress')
+    return 'Mistress'
+
+
+async def upd_names(msg, bot_new, user_new):
+    user_id = str(msg.from_user.id)
+    username = msg.from_user.username
+    doc = await users_collection.find_one({"user_id": user_id, "username": username})
+    if not doc:
+        return
+    bot_old = doc['bot_alias']
+    user_old = doc['user_alias']
+    history = doc['history']
+
+    if history:
+        history[0] = history[0].replace(bot_old, bot_new).replace(user_old, user_new)
+
+    for i, story in enumerate(history[1:], start=1):
+        if f'{bot_old}: ' in story:
+            history[i] = story.replace(f'{bot_old}: ', f'{bot_new}: ')
+        elif f'{user_old}: ' in story:
+            history[i] = story.replace(f'{user_old}: ', f'{user_new}: ')
+
+    await users_collection.update_one(
+        {"user_id": user_id, "username": username},
+        {"$set": {"user_alias": user_new, "bot_alias": bot_new, "history": history}}
+    )
+
+
+async def trim_history(msg, model=model):
+    limit = model.n_ctx() - MAX_TOKENS
+    tokens = await get_tokens(msg, model)
+    if tokens <= limit:
+        return
+
+    user_id = str(msg.from_user.id)
+    username = msg.from_user.username
+    doc = await users_collection.find_one({"user_id": user_id, "username": username})
+    if not doc:
+        return
+
+    history = doc['history']
+    new_history = [history[0]]
+
+    for story in reversed(history[1:]):
+        temp_history = new_history.copy()
+        temp_history.insert(1, story)
+        if len(model.tokenize(''.join(temp_history).encode("utf-8"), add_bos=False)) > limit:
+            break
+        new_history.insert(1, story)
+
+    await users_collection.update_one(
+        {"user_id": user_id, "username": username},
+        {"$set": {"history": new_history}}
+    )
+
+
+async def add_history(msg, content, trim=True, model=model):
+    user_id = str(msg.from_user.id)
+    username = msg.from_user.username
+    await users_collection.update_one(
+        {"user_id": user_id, "username": username},
+        {"$push": {"history": content}}
+    )
+    if trim:
+        await trim_history(msg, model)
+
+
+async def add_log(msg, role, content):
+    user_id = str(msg.from_user.id)
+    username = msg.from_user.username
+    log_entry = {
         'timestamp': datetime.now().isoformat(),
         'role': role,
         'content': content
-    })
-    write_data(data)
-    
-def add_data(msg, role, content, filename=DB_PATH):
-    userid, username = str(msg.from_user.id), msg.from_user.username
-    
-    data = read_data()
-    if userid not in data:
-        data[userid] = {}
-        data[userid][username] = {
-            'user alias': msg.from_user.first_name,
-            'bot alias': 'Mistress',
-            'history': [get_starter_prompt()],
-            'log': []
-        }
-        write_data(data)
-        upd_names(
-            msg,
-            bot_old='<bot alias>',
-            user_old='<user alias>',
-            bot_new=data[userid][username]['bot alias'],
-            user_new=data[userid][username]['user alias']
+    }
+    await users_collection.update_one(
+        {"user_id": user_id, "username": username},
+        {"$push": {"log": log_entry}}
+    )
+
+
+async def add_data(msg, role, content):
+    user_id = str(msg.from_user.id)
+    username = msg.from_user.username
+
+    doc = await users_collection.find_one({"user_id": user_id, "username": username})
+    if not doc:
+        # Создаём пользователя с плейсхолдерами
+        user_alias_placeholder = '<user alias>'
+        bot_alias_placeholder = '<bot alias>'
+        starter = get_starter_prompt()
+        history = [starter]
+        log = []
+        await users_collection.insert_one({
+            "user_id": user_id,
+            "username": username,
+            "user_alias": user_alias_placeholder,
+            "bot_alias": bot_alias_placeholder,
+            "history": history,
+            "log": log
+        })
+        # Заменяем плейсхолдеры на реальные имена
+        real_user_alias = msg.from_user.first_name
+        real_bot_alias = 'Mistress'
+        await upd_names(msg, real_bot_alias, real_user_alias)
+
+    await add_log(msg, role, content)
+    if role in {'user', 'bot'}:
+        await add_history(msg, content)
+
+
+async def clear_history(msg):
+    user_id = str(msg.from_user.id)
+    username = msg.from_user.username
+    doc = await users_collection.find_one({"user_id": user_id, "username": username})
+    if doc and doc['history']:
+        new_history = [doc['history'][0]]
+        await users_collection.update_one(
+            {"user_id": user_id, "username": username},
+            {"$set": {"history": new_history}}
         )
-        
-    add_log(msg, role, content)
-    if role in {'user', 'bot'}: add_history(msg, content)
