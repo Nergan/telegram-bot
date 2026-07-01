@@ -2,17 +2,21 @@ import os
 import asyncio
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, FastAPI
 from fastapi.responses import RedirectResponse
 from motor.motor_asyncio import AsyncIOMotorClient
+from dotenv import load_dotenv
 
-from .bot import get_bot, dp, set_db
+from bot import get_bot, dp, set_db
 
 logger = logging.getLogger(__name__)
 background_tasks = set()
 db_client = None
 
+load_dotenv()  
+app = FastAPI(title="Telegram Bot") 
 router = APIRouter()
+app.include_router(router)
 
 async def run_bot_polling(token):
     """Wrapper task to GUARANTEE exceptions are logged and not swallowed."""
@@ -71,3 +75,7 @@ async def shutdown_clients():
         
     if db_client:
         db_client.close()
+        
+@app.on_event("shutdown")
+async def shutdown():
+    await shutdown_clients()
