@@ -35,7 +35,6 @@ async def lifespan(app: FastAPI):
     yield
     
     # 3. Teardown
-    await bot.delete_webhook()
     await bot.session.close()
     Database.disconnect()
     logger.info("Application shutdown complete.")
