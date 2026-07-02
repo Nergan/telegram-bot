@@ -1,43 +1,164 @@
 import uuid
 from aiogram import Router, F, types
-from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
+from aiogram.filters import Command, CommandStart
 from bot.bot_setup import bot
-from bot.keyboards import main_menu_kb, profile_card_kb, skip_message_kb, contact_decision_kb
-from bot.states import ContactRequest
+from bot.keyboards import main_menu_kb, profiles_list_kb, profile_management_kb, profile_card_kb
 from core.database import Database
 
 router = Router()
 
 def format_profile(profile_data: dict) -> str:
-    text = f"<b>Profile ID:</b> {profile_data.get('public_uuid')}\n\n"
+    text = f"<b>Profile ID:</b> <code>{profile_data.get('public_uuid')}</code>\n\n"
     if profile_data.get('text'):
         text += f"📝 {profile_data['text']}\n\n"
     if profile_data.get('tags'):
         text += f"🏷️ <b>Tags:</b> #{' #'.join(profile_data['tags'])}"
     return text
 
-@router.message(Command("start", "menu"))
+# --- COMMANDS ---
+
+@router.message(CommandStart())
 async def start_cmd(message: types.Message):
-    await Database.get_or_create_profile(message.from_user.id)
-    await message.answer(
-        "Welcome! Discover people by interests or traits.\n"
-        "Fill out as much (or as little) as you want.",
-        reply_markup=main_menu_kb()
-    )
+    args = message.text.split()
+    if len(args) > 1:
+        # Deep Linking logic
+        target_uuid = args[1]
+        profile = await Database.get_profile_by_uuid(target_uuid)
+        if profile and not profile.get("is_hidden"):
+            await message.answer("🔍 Found profile via link:\n" + format_profile(profile), reply_markup=profile_card_kb(target_uuid))
+            return
+        else:
+            await message.answer("❌ Profile not found or is hidden.")
+            
+    await message.answer("Welcome to Day Dating! Select an option below:", reply_markup=main_menu_kb())
+
+@router.message(Command("menu"))
+async def menu_cmd(message: types.Message):
+    await message.answer("Main Menu:", reply_markup=main_menu_kb())
+
+@router.message(Command("profiles"))
+async def profiles_cmd(message: types.Message):
+    await my_profiles_callback(message)
+
+@router.message(Command("search"))
+async def search_cmd(message: types.Message):
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Please provide an ID. Example: `/search a1b2c3d4`", parse_mode="Markdown")
+        return
+    
+    profile = await Database.get_profile_by_uuid(args[1])
+    if profile:
+        await message.answer(format_profile(profile), reply_markup=profile_card_kb(profile['public_uuid']))
+    else:
+        await message.answer("❌ Profile not found.")
+
+# --- NAVIGATION & PROFILES ---
+
+@router.callback_query(F.data == "main_menu")
+async def main_menu_callback(callback: types.CallbackQuery):
+    await callback.message.edit_text("Main Menu:", reply_markup=main_menu_kb())
+
+@router.callback_query(F.data == "my_profiles")
+async def my_profiles_callback(callback: types.CallbackQuery | types.Message):
+    user_id = callback.from_user.id
+    cursor = Database.db.profiles.find({"user_id": user_id, "is_deleted": False})
+    profiles = await cursor.to_list(length=10)
+    
+    if not profiles:
+        await Database.create_profile(user_id)
+        cursor = Database.db.profiles.find({"user_id": user_id, "is_deleted": False})
+        profiles = await cursor.to_list(length=10)
+        
+    text = "👤 <b>Your Profiles</b>\nManage your identities below. Only one can be Active for browsing."
+    kb = profiles_list_kb(profiles)
+    
+    if isinstance(callback, types.CallbackQuery):
+        await callback.message.edit_text(text, reply_markup=kb)
+        await callback.answer()
+    else:
+        await callback.answer(text, reply_markup=kb)
+
+@router.callback_query(F.data == "create_profile")
+async def create_profile_callback(callback: types.CallbackQuery):
+    await Database.create_profile(callback.from_user.id)
+    await callback.answer("✅ New profile created!")
+    await my_profiles_callback(callback)
+
+@router.callback_query(F.data.startswith("manage_prof_"))
+async def manage_prof_callback(callback: types.CallbackQuery):
+    prof_uuid = callback.data.split("_")[2]
+    profile = await Database.get_profile_by_uuid(prof_uuid)
+    if not profile or profile['user_id'] != callback.from_user.id:
+        return await callback.answer("Profile not found.", show_alert=True)
+    
+    await callback.message.edit_text(f"⚙️ <b>Managing Profile:</b> {prof_uuid}\n\n" + format_profile(profile), reply_markup=profile_management_kb(profile))
+
+@router.callback_query(F.data.startswith("set_active_"))
+async def set_active_callback(callback: types.CallbackQuery):
+    prof_uuid = callback.data.split("_")[2]
+    await Database.set_active_profile(callback.from_user.id, prof_uuid)
+    await callback.answer("🌟 Profile set as Active!")
+    await my_profiles_callback(callback)
+
+@router.callback_query(F.data.startswith("toggle_hide_"))
+async def toggle_hide_callback(callback: types.CallbackQuery):
+    prof_uuid = callback.data.split("_")[2]
+    profile = await Database.get_profile_by_uuid(prof_uuid)
+    new_state = not profile.get('is_hidden', False)
+    await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"is_hidden": new_state}})
+    await callback.answer(f"Profile {'hidden' if new_state else 'unhidden'}!")
+    await manage_prof_callback(callback) # Refresh
+
+@router.callback_query(F.data.startswith("regen_id_"))
+async def regen_id_callback(callback: types.CallbackQuery):
+    prof_uuid = callback.data.split("_")[2]
+    new_uuid = uuid.uuid4().hex[:8]
+    await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"public_uuid": new_uuid}})
+    await callback.answer("🔄 ID Regenerated!")
+    callback.data = f"manage_prof_{new_uuid}" # Patch callback data for refresh
+    await manage_prof_callback(callback)
+
+@router.callback_query(F.data.startswith("delete_prof_"))
+async def delete_prof_callback(callback: types.CallbackQuery):
+    prof_uuid = callback.data.split("_")[2]
+    await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"is_deleted": True, "is_active": False}})
+    await callback.answer("🗑️ Profile deleted.")
+    await my_profiles_callback(callback)
 
 # --- BROWSING ---
 
+@router.callback_query(F.data == "browse_profiles" )
+async def start_browsing(callback: types.CallbackQuery):
+    await next_profile(callback)
+
 @router.callback_query(F.data == "next_profile")
 async def next_profile(callback: types.CallbackQuery):
-    # In a real app, retrieve user's search session cursor. 
-    # For now, we fetch a random profile they haven't seen.
-    pipeline = [{"$match": {"user_id": {"$ne": callback.from_user.id}}}, {"$sample": {"size": 1}}]
+    user_id = callback.from_user.id
+    session = await Database.db.search_sessions.find_one({"user_id": user_id})
+    filters = session.get("filters", {}) if session else {}
+
+    # Build Mongo Query
+    and_clauses = [
+        {"user_id": {"$ne": user_id}}, 
+        {"is_active": True}, 
+        {"is_hidden": False}, 
+        {"is_deleted": False}
+    ]
+    
+    if filters.get("require_tags"):
+        and_clauses.append({"tags": {"$all": filters["require_tags"]}})
+    if filters.get("exclude_tags"):
+        and_clauses.append({"tags": {"$nin": filters["exclude_tags"]}})
+    if filters.get("any_tags"):
+        and_clauses.append({"tags": {"$in": filters["any_tags"]}})
+        
+    pipeline = [{"$match": {"$and": and_clauses}}, {"$sample": {"size": 1}}]
     cursor = Database.db.profiles.aggregate(pipeline)
     profiles = await cursor.to_list(length=1)
     
     if not profiles:
-        await callback.answer("No more profiles found!", show_alert=True)
+        await callback.answer("No more profiles matching your filters!", show_alert=True)
         return
 
     profile = profiles[0]
@@ -45,111 +166,18 @@ async def next_profile(callback: types.CallbackQuery):
     kb = profile_card_kb(profile['public_uuid'])
 
     try:
-        # Edit current message to avoid chat spam
-        if profile.get('media'):
-            media_id = profile['media']['file_id']
-            # Example assumes photo. You'd check media_type here.
-            media = types.InputMediaPhoto(media=media_id, caption=text)
-            await callback.message.edit_media(media=media, reply_markup=kb)
-        else:
-            await callback.message.edit_text(text, reply_markup=kb)
+        await callback.message.edit_text(text, reply_markup=kb)
     except Exception:
-        # Fallback if message types differ (e.g. text -> photo)
         await callback.message.delete()
-        if profile.get('media'):
-            await callback.message.answer_photo(photo=profile['media']['file_id'], caption=text, reply_markup=kb)
-        else:
-            await callback.message.answer(text, reply_markup=kb)
-    
+        await callback.message.answer(text, reply_markup=kb)
+        
     await callback.answer()
 
-# --- CONTACT REQUESTS ---
-
-@router.callback_query(F.data.startswith("req_") | F.data.startswith("send_"))
-async def init_contact_request(callback: types.CallbackQuery, state: FSMContext):
-    action, target_uuid = callback.data.split("_")
-    
-    await state.update_data(target_uuid=target_uuid, action=action)
-    await state.set_state(ContactRequest.waiting_for_message)
-    
-    prompt = "Attach a message (text, photo, voice) to your request, or skip:"
-    await callback.message.answer(prompt, reply_markup=skip_message_kb())
-    await callback.answer()
-
-async def execute_contact_request(user_id: int, state: FSMContext, message: types.Message = None):
-    data = await state.get_data()
-    target_uuid = data['target_uuid']
-    action = data['action'] # 'req' or 'send'
-    
-    target_profile = await Database.db.profiles.find_one({"public_uuid": target_uuid})
-    if not target_profile:
-        return
-        
-    req_id = uuid.uuid4().hex
-    request_doc = {
-        "req_id": req_id,
-        "initiator_id": user_id,
-        "target_id": target_profile['user_id'],
-        "action": action,
-        "status": "pending",
-        "message": None
-    }
-    
-    if message:
-        request_doc['message'] = message.text or message.caption or "[Media]"
-        # Here you would also extract file_id if media was sent
-
-    await Database.db.contact_requests.insert_one(request_doc)
-    await state.clear()
-
-    # Notify Target
-    initiator = await Database.get_or_create_profile(user_id)
-    text = f"🔔 <b>New Contact Request!</b>\nFrom Profile: {initiator['public_uuid']}\n"
-    if request_doc['message']:
-        text += f"💬 Message: <i>{request_doc['message']}</i>\n"
-        
-    if action == "send":
-        text = f"🤝 <b>User shared their contact with you!</b>\n" + text
-        
-    await bot.send_message(
-        target_profile['user_id'], 
-        text, 
-        reply_markup=contact_decision_kb(req_id, is_sending=(action=="send"))
+# --- CATCH-ALL FALLBACK ---
+@router.message()
+async def unhandled_message_fallback(message: types.Message):
+    await message.answer(
+        "🤷 I didn't quite catch that.\n"
+        "Please use the menu buttons or type /menu.",
+        reply_markup=main_menu_kb()
     )
-
-@router.callback_query(F.data == "skip_req_msg", ContactRequest.waiting_for_message)
-async def skip_contact_msg(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.delete()
-    await execute_contact_request(callback.from_user.id, state)
-    await callback.message.answer("✅ Request sent!")
-    await callback.answer()
-
-@router.message(ContactRequest.waiting_for_message)
-async def capture_contact_msg(message: types.Message, state: FSMContext):
-    await execute_contact_request(message.from_user.id, state, message)
-    await message.answer("✅ Request sent with message!")
-
-# --- CONTACT ACCEPTANCE ---
-
-@router.callback_query(F.data.startswith("accept_"))
-async def accept_contact(callback: types.CallbackQuery):
-    req_id = callback.data.split("_")[1]
-    req = await Database.db.contact_requests.find_one({"req_id": req_id})
-    
-    if not req or req['status'] != 'pending':
-        await callback.answer("Request expired.", show_alert=True)
-        return
-        
-    await Database.db.contact_requests.update_one({"req_id": req_id}, {"$set": {"status": "accepted"}})
-    
-    target_user = await bot.get_chat(callback.from_user.id)
-    target_contact = f"@{target_user.username}" if target_user.username else f"<a href='tg://user?id={target_user.id}'>Link</a>"
-    
-    # Notify Initiator
-    await bot.send_message(
-        req['initiator_id'], 
-        f"✅ <b>Contact Accepted!</b>\nHere is their contact: {target_contact}"
-    )
-    
-    await callback.message.edit_text(callback.message.text + f"\n\n✅ <i>You shared your contact.</i>")
-    await callback.answer()

@@ -3,17 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tag Selection</title>
+    <title>Tags Interface</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body { font-family: sans-serif; background-color: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); padding: 20px; }
-        .tag { display: inline-block; padding: 10px 15px; margin: 5px; border-radius: 20px; background-color: var(--tg-theme-secondary-bg-color, #e0e0e0); cursor: pointer; transition: 0.2s; }
+        body { font-family: sans-serif; background-color: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); padding: 15px; margin: 0; }
+        .search-container { margin-bottom: 15px; }
+        input[type="text"] { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--tg-theme-hint-color, #ccc); background: var(--tg-theme-secondary-bg-color, #f4f4f4); color: var(--tg-theme-text-color); box-sizing: border-box; }
+        
+        .tag { display: inline-block; padding: 8px 12px; margin: 5px; border-radius: 15px; background-color: var(--tg-theme-secondary-bg-color, #e0e0e0); cursor: pointer; transition: 0.2s; user-select: none; font-size: 14px;}
+        
+        /* Edit Mode Styles */
         .tag.selected { background-color: var(--tg-theme-button-color, #3390ec); color: var(--tg-theme-button-text-color, #ffffff); }
-        h2 { margin-bottom: 20px; }
+        
+        /* Filter Mode Styles */
+        .tag.require { background-color: #4CAF50; color: white; } /* Green */
+        .tag.exclude { background-color: #F44336; color: white; } /* Red */
+        .tag.any { background-color: #2196F3; color: white; } /* Blue */
+
+        #legend { font-size: 12px; color: var(--tg-theme-hint-color, #888); margin-bottom: 15px; }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
-    <h2 id="title">Select Tags</h2>
+    <h3 id="title">Tags</h3>
+    <div id="legend"></div>
+    <div class="search-container">
+        <input type="text" id="searchInput" placeholder="Search tags (e.g. coding, usa)...">
+    </div>
     <div id="tags-container">Loading...</div>
 
     <script>
@@ -22,44 +38,95 @@
         
         const urlParams = new URLSearchParams(window.location.search);
         const mode = urlParams.get('mode') || 'edit';
-        document.getElementById('title').innerText = mode === 'edit' ? 'Edit Your Tags' : 'Filter Profiles by Tags';
+        const profile_id = urlParams.get('profile_id');
+        
+        let allTags = [];
+        let stateMap = {}; // system_name -> state (0:neutral, 1:require, 2:exclude, 3:any / 0:unselected, 1:selected)
 
-        let selectedTags = [];
+        if(mode === 'edit') {
+            document.getElementById('title').innerText = 'Edit Profile Tags';
+            document.getElementById('legend').innerText = 'Tap to select tags for your profile.';
+        } else {
+            document.getElementById('title').innerText = 'Advanced Filter';
+            document.getElementById('legend').innerHTML = 'Tap to cycle logic: <br>🟩 Must have | 🟥 Must NOT have | 🟦 Can have any';
+        }
 
         async function init() {
             const res = await fetch('/api/tags');
             const data = await res.json();
+            allTags = data.tags;
+            renderTags();
+        }
+
+        function renderTags() {
             const container = document.getElementById('tags-container');
             container.innerHTML = '';
 
-            data.tags.forEach(tag => {
+            allTags.forEach(tag => {
                 const el = document.createElement('div');
                 el.className = 'tag';
-                el.innerText = '#' + tag;
-                el.onclick = () => {
-                    el.classList.toggle('selected');
-                    if (el.classList.contains('selected')) {
-                        selectedTags.push(tag);
-                    } else {
-                        selectedTags = selectedTags.filter(t => t !== tag);
-                    }
-                    tg.MainButton.setText(`Save (${selectedTags.length})`);
-                    if(selectedTags.length > 0) tg.MainButton.show();
-                    else tg.MainButton.hide();
-                };
+                el.innerText = tag.display;
+                el.dataset.id = tag.id;
+                el.dataset.aliases = tag.aliases.join(' ').toLowerCase();
+                
+                stateMap[tag.id] = 0; // default state
+
+                el.onclick = () => handleTagClick(el, tag.id);
                 container.appendChild(el);
             });
         }
 
+        function handleTagClick(el, tagId) {
+            if(mode === 'edit') {
+                stateMap[tagId] = stateMap[tagId] === 1 ? 0 : 1;
+                el.className = `tag ${stateMap[tagId] === 1 ? 'selected' : ''}`;
+            } else {
+                stateMap[tagId] = (stateMap[tagId] + 1) % 4; // 0->1->2->3->0
+                el.className = 'tag';
+                if(stateMap[tagId] === 1) el.classList.add('require');
+                if(stateMap[tagId] === 2) el.classList.add('exclude');
+                if(stateMap[tagId] === 3) el.classList.add('any');
+            }
+            updateMainButton();
+        }
+
+        function updateMainButton() {
+            tg.MainButton.setText("Save & Apply");
+            tg.MainButton.show();
+        }
+
+        // Search logic
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            document.querySelectorAll('.tag').forEach(el => {
+                const display = el.innerText.toLowerCase();
+                const aliases = el.dataset.aliases;
+                if(display.includes(query) || aliases.includes(query)) {
+                    el.classList.remove('hidden');
+                } else {
+                    el.classList.add('hidden');
+                }
+            });
+        });
+
         tg.MainButton.onClick(async () => {
-            await fetch('/api/update', {
+            let endpoint = '/api/update_edit';
+            let payload = { initData: tg.initData, mode: mode };
+
+            if(mode === 'edit') {
+                payload.profile_id = profile_id;
+                payload.tags = Object.keys(stateMap).filter(k => stateMap[k] === 1);
+            } else {
+                endpoint = '/api/update_filter';
+                payload.require_tags = Object.keys(stateMap).filter(k => stateMap[k] === 1);
+                payload.exclude_tags = Object.keys(stateMap).filter(k => stateMap[k] === 2);
+                payload.any_tags = Object.keys(stateMap).filter(k => stateMap[k] === 3);
+            }
+
+            await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    initData: tg.initData,
-                    tags: selectedTags,
-                    mode: mode
-                })
+                body: JSON.stringify(payload)
             });
             tg.close();
         });
