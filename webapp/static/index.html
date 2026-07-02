@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tag Selection</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { font-family: sans-serif; background-color: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); padding: 20px; }
+        .tag { display: inline-block; padding: 10px 15px; margin: 5px; border-radius: 20px; background-color: var(--tg-theme-secondary-bg-color, #e0e0e0); cursor: pointer; transition: 0.2s; }
+        .tag.selected { background-color: var(--tg-theme-button-color, #3390ec); color: var(--tg-theme-button-text-color, #ffffff); }
+        h2 { margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <h2 id="title">Select Tags</h2>
+    <div id="tags-container">Loading...</div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        
+        const urlParams = new URLSearchParams(window.location.search);
+        const mode = urlParams.get('mode') || 'edit';
+        document.getElementById('title').innerText = mode === 'edit' ? 'Edit Your Tags' : 'Filter Profiles by Tags';
+
+        let selectedTags = [];
+
+        async function init() {
+            const res = await fetch('/api/tags');
+            const data = await res.json();
+            const container = document.getElementById('tags-container');
+            container.innerHTML = '';
+
+            data.tags.forEach(tag => {
+                const el = document.createElement('div');
+                el.className = 'tag';
+                el.innerText = '#' + tag;
+                el.onclick = () => {
+                    el.classList.toggle('selected');
+                    if (el.classList.contains('selected')) {
+                        selectedTags.push(tag);
+                    } else {
+                        selectedTags = selectedTags.filter(t => t !== tag);
+                    }
+                    tg.MainButton.setText(`Save (${selectedTags.length})`);
+                    if(selectedTags.length > 0) tg.MainButton.show();
+                    else tg.MainButton.hide();
+                };
+                container.appendChild(el);
+            });
+        }
+
+        tg.MainButton.onClick(async () => {
+            await fetch('/api/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    initData: tg.initData,
+                    tags: selectedTags,
+                    mode: mode
+                })
+            });
+            tg.close();
+        });
+
+        init();
+    </script>
+</body>
+</html>
