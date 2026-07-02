@@ -16,11 +16,13 @@
         .section { margin-bottom: 20px; padding: 10px; border-radius: 10px; background: rgba(0,0,0,0.05); min-height: 50px;}
         .hidden { display: none !important; }
         h4 { margin-top: 0; margin-bottom: 10px; }
+        #error-msg { color: red; font-size: 12px; display: none; }
     </style>
 </head>
 <body>
     <h3 id="title">Tags Interface</h3>
     <p id="legend" style="font-size: 12px; color: gray;"></p>
+    <p id="error-msg"></p>
     
     <div class="section" id="sel-section">
         <h4>Selected / Active</h4>
@@ -39,7 +41,10 @@
         const urlParams = new URLSearchParams(window.location.search);
         const mode = urlParams.get('mode') || 'edit';
         const profile_id = urlParams.get('profile_id');
-        let allTags = []; let stateMap = {};
+        
+        // Data injected safely by FastAPI template
+        let allTags = {{AVAILABLE_TAGS_JSON}}; 
+        let stateMap = {};
 
         if(mode === 'edit') {
             document.getElementById('title').innerText = 'Edit Profile Tags';
@@ -50,17 +55,30 @@
         }
 
         async function init() {
-            let res = await fetch('/api/tags'); allTags = (await res.json()).tags;
-            let pRes = await fetch('/api/get_profile_data', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ initData: tg.initData, profile_id: profile_id }) });
-            let pData = await pRes.json();
-            
             allTags.forEach(t => stateMap[t.id] = 0);
-            if(mode === 'edit') { pData.tags.forEach(t => { if(t in stateMap) stateMap[t] = 1; }); } 
-            else {
-                let f = pData.filters;
-                if(f.require_tags) f.require_tags.forEach(t => { if(t in stateMap) stateMap[t] = 1; });
-                if(f.exclude_tags) f.exclude_tags.forEach(t => { if(t in stateMap) stateMap[t] = 2; });
-                if(f.any_tags) f.any_tags.forEach(t => { if(t in stateMap) stateMap[t] = 3; });
+            try {
+                let pRes = await fetch('/api/get_profile_data', { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({ initData: tg.initData, profile_id: profile_id }) 
+                });
+                
+                if (pRes.ok) {
+                    let pData = await pRes.json();
+                    if(mode === 'edit') { 
+                        pData.tags.forEach(t => { if(t in stateMap) stateMap[t] = 1; }); 
+                    } else {
+                        let f = pData.filters;
+                        if(f.require_tags) f.require_tags.forEach(t => { if(t in stateMap) stateMap[t] = 1; });
+                        if(f.exclude_tags) f.exclude_tags.forEach(t => { if(t in stateMap) stateMap[t] = 2; });
+                        if(f.any_tags) f.any_tags.forEach(t => { if(t in stateMap) stateMap[t] = 3; });
+                    }
+                } else {
+                    document.getElementById('error-msg').innerText = "Warning: Failed to load existing settings.";
+                    document.getElementById('error-msg').style.display = 'block';
+                }
+            } catch (e) {
+                console.error(e);
             }
             renderTags();
         }
@@ -87,7 +105,7 @@
                     if(mode === 'edit') stateMap[tag.id] = st === 1 ? 0 : 1;
                     else stateMap[tag.id] = (st + 1) % 4;
                     tg.MainButton.setText("Save & Apply"); tg.MainButton.show();
-                    renderTags(); // Re-render to move element
+                    renderTags(); 
                 };
 
                 if(st !== 0) selCont.appendChild(el); else availCont.appendChild(el);

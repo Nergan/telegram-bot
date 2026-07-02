@@ -1,14 +1,15 @@
+import os
+import json
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from core.config import AVAILABLE_TAGS
 from core.security import validate_webapp_data
 from core.database import Database
 from bot.bot_setup import bot
-from bot.keyboards import dashboard_kb
+from bot.keyboards import main_menu_kb
 from bot.helpers import send_profile
-import os
-from fastapi.responses import HTMLResponse
 
 router = APIRouter()
 
@@ -18,11 +19,10 @@ class WebAppPayload(BaseModel):
 
 @router.get("/webapp", response_class=HTMLResponse)
 async def serve_webapp():
+    # Injects the JSON array directly into the HTML to avoid frontend fetch/CORS errors completely.
     with open(os.path.join(os.path.dirname(__file__), "static", "index.html"), "r", encoding="utf-8") as f:
-        return f.read()
-
-@router.get("/api/tags")
-async def get_tags(): return {"tags": AVAILABLE_TAGS}
+        html = f.read()
+    return html.replace("{{AVAILABLE_TAGS_JSON}}", json.dumps(AVAILABLE_TAGS))
 
 @router.post("/api/get_profile_data")
 async def get_profile_data(payload: WebAppPayload):
@@ -43,10 +43,9 @@ async def update_tags(payload: WebAppPayload):
         f_data = {"require_tags": payload.require_tags, "exclude_tags": payload.exclude_tags, "any_tags": payload.any_tags}
         await Database.db.profiles.update_one({"user_id": user_id, "public_uuid": payload.profile_id}, {"$set": {"filters": f_data}})
         
-    # IMMEDIATE UPDATE: Send fresh dashboard
     active = await Database.get_active_profile(user_id)
     if active and active['public_uuid'] == payload.profile_id:
         await bot.send_message(user_id, "✅ Settings updated from WebApp!")
-        await send_profile(user_id, active, dashboard_kb(active['public_uuid']), is_dashboard=True)
+        await send_profile(user_id, active, main_menu_kb(active['public_uuid']), is_main_menu=True)
         
     return {"status": "ok"}

@@ -46,7 +46,7 @@ class Database:
             "tags": [],
             "filters": {"require_tags": [], "exclude_tags": [], "any_tags": []},
             "text": None,
-            "media": {"items": [], "voice": None}, # items: up to 5 {type, file_id}
+            "media": None, # dict: {"type": str, "file_id": str}
             "public_contact": None,
             "private_contact": None,
             "is_active": False,
@@ -76,7 +76,7 @@ class Database:
     @classmethod
     async def delete_profile(cls, user_id: int, public_uuid: str) -> bool:
         if await cls.db.profiles.count_documents({"user_id": user_id}) <= 1:
-            return False # Prevent deleting last profile
+            return False 
             
         await cls.db.profiles.delete_one({"user_id": user_id, "public_uuid": public_uuid})
         active = await cls.db.profiles.find_one({"user_id": user_id, "is_active": True})
