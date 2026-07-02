@@ -44,6 +44,7 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(webapp_router)
 
 @app.get("/")
+@app.head("/")
 async def health_check():
     """Корневой эндпоинт для проверок работоспособности (Render Health Checks)"""
     return {"status": "ok", "message": "Telegram Bot is running"}
