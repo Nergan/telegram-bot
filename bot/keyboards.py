@@ -11,7 +11,7 @@ def main_menu_kb(profile_uuid: str) -> ReplyKeyboardMarkup:
             KeyboardButton(text="🏷️ Tags", web_app=WebAppInfo(url=f"{WEBHOOK_URL}/webapp?mode=edit&profile_id={profile_uuid}")),
             KeyboardButton(text="🎛️ Filters", web_app=WebAppInfo(url=f"{WEBHOOK_URL}/webapp?mode=filter&profile_id={profile_uuid}"))
         ],
-        [KeyboardButton(text="👥 Profiles")]
+        [KeyboardButton(text="👥 Profiles"), KeyboardButton(text="🔒 View Private Contacts")]
     ], resize_keyboard=True)
 
 def edit_info_menu_kb() -> ReplyKeyboardMarkup:
@@ -23,6 +23,12 @@ def edit_info_menu_kb() -> ReplyKeyboardMarkup:
 
 def edit_fsm_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="❌ Cancel"), KeyboardButton(text="🗑️ Clear Field")]
+    ], resize_keyboard=True)
+
+def edit_media_fsm_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="✅ Done (Save Media)")],
         [KeyboardButton(text="❌ Cancel"), KeyboardButton(text="🗑️ Clear Field")]
     ], resize_keyboard=True)
 

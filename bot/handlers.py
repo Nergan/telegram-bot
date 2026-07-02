@@ -1,4 +1,5 @@
 import uuid
+import html
 from aiogram import Router, F, types
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
@@ -16,6 +17,15 @@ async def show_main_menu(message: types.Message, state: FSMContext):
     await state.clear()
     active_profile = await Database.get_or_create_active_profile(message.from_user.id)
     await send_profile(message.chat.id, active_profile, main_menu_kb(active_profile['public_uuid']), is_main_menu=True)
+
+@router.message(F.text == "🔒 View Private Contacts")
+async def view_private_contacts(message: types.Message):
+    active_prof = await Database.get_active_profile(message.from_user.id)
+    priv = active_prof.get('private_contact')
+    if priv:
+        await message.answer(f"🔒 <b>Your Private Contacts:</b>\n\n{html.escape(priv)}")
+    else:
+        await message.answer("🔒 You have not set any Private Contacts yet.")
 
 # --- EDITING ROUTING ---
 
@@ -38,9 +48,10 @@ async def init_edit_text(message: types.Message, state: FSMContext):
 @router.message(F.text == "📸 Edit Media")
 async def init_edit_media(message: types.Message, state: FSMContext):
     await state.set_state(ProfileSetup.waiting_for_media)
+    await state.update_data(temp_media=[])
     await message.answer(
-        "Send exactly 1 Photo, Video, Voice, Audio, or Animation to attach to your profile.", 
-        reply_markup=edit_fsm_kb()
+        "Send up to 10 Photos or Videos.\nWhen finished, click '✅ Done (Save Media)'.", 
+        reply_markup=edit_media_fsm_kb()
     )
 
 # --- FSM ACTIONS (Cancel / Clear) ---
@@ -62,7 +73,8 @@ async def fsm_clear(message: types.Message, state: FSMContext):
     field = field_map.get(curr_state)
     if field:
         active_prof = await Database.get_active_profile(message.from_user.id)
-        await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {field: None}})
+        val = [] if field == "media" else None
+        await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {field: val}})
         await message.answer("🗑️ Cleared.")
     await show_main_menu(message, state)
 
@@ -89,23 +101,25 @@ async def capture_text(message: types.Message, state: FSMContext):
 async def capture_media(message: types.Message, state: FSMContext):
     if message.text in ["❌ Cancel", "🗑️ Clear Field"]: return
     
-    valid_types = ['photo', 'video', 'voice', 'animation', 'audio', 'document']
-    if message.content_type not in valid_types:
-        return await message.answer(f"❌ Please send a valid media file. Received: {message.content_type}")
+    if message.text == "✅ Done (Save Media)":
+        data = await state.get_data()
+        final_media = data.get("temp_media", [])
+        active_prof = await Database.get_active_profile(message.from_user.id)
+        await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": final_media}})
+        await message.answer(f"✅ Media saved ({len(final_media)} items).")
+        return await show_main_menu(message, state)
         
-    active_prof = await Database.get_active_profile(message.from_user.id)
+    valid_types = ['photo', 'video']
+    if message.content_type not in valid_types:
+        return await message.answer("❌ Please send only Photos or Videos, or click '✅ Done'.")
+        
+    data = await state.get_data()
+    temp_media = data.get("temp_media", [])
     
-    media_doc = {"type": message.content_type}
-    if message.photo: media_doc['file_id'] = message.photo[-1].file_id
-    elif message.video: media_doc['file_id'] = message.video.file_id
-    elif message.voice: media_doc['file_id'] = message.voice.file_id
-    elif message.animation: media_doc['file_id'] = message.animation.file_id
-    elif message.audio: media_doc['file_id'] = message.audio.file_id
-    elif message.document: media_doc['file_id'] = message.document.file_id
-    
-    await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": media_doc}})
-    await message.answer("✅ Media saved!")
-    await show_main_menu(message, state)
+    if len(temp_media) < 10:
+        if message.photo: temp_media.append({"type": "photo", "file_id": message.photo[-1].file_id})
+        elif message.video: temp_media.append({"type": "video", "file_id": message.video.file_id})
+        await state.update_data(temp_media=temp_media)
 
 # --- PROFILES MANAGEMENT ---
 
@@ -243,13 +257,12 @@ async def execute_contact_request(user_id: int, state: FSMContext, message=None)
 # --- FALLBACK HANDLER ---
 @router.message()
 async def unhandled_message(message: types.Message, state: FSMContext):
-    """Catches all unrecognized input globally."""
     curr_state = await state.get_state()
     if curr_state:
-        await message.answer("❌ Invalid format or command. Please send the correct content, or press '❌ Cancel'.")
+        await message.answer("❌ Invalid format. Please send the correct content, or press '❌ Cancel'.")
     else:
         active = await Database.get_active_profile(message.from_user.id)
         if active:
             await message.answer("🤷 I didn't understand that. Please use the menu buttons below.", reply_markup=main_menu_kb(active['public_uuid']))
         else:
-            await message.answer("🤷 I didn't understand that. Send /start to begin.")
+            await message.answer("🤷 Send /start to begin.")

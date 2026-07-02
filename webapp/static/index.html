@@ -16,7 +16,7 @@
         .section { margin-bottom: 20px; padding: 10px; border-radius: 10px; background: rgba(0,0,0,0.05); min-height: 50px;}
         .hidden { display: none !important; }
         h4 { margin-top: 0; margin-bottom: 10px; }
-        #error-msg { color: red; font-size: 12px; display: none; }
+        #error-msg { font-size: 13px; margin-bottom: 10px; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -42,7 +42,6 @@
         const mode = urlParams.get('mode') || 'edit';
         const profile_id = urlParams.get('profile_id');
         
-        // Data injected safely by FastAPI template
         let allTags = {{AVAILABLE_TAGS_JSON}}; 
         let stateMap = {};
 
@@ -60,7 +59,7 @@
                 let pRes = await fetch('/api/get_profile_data', { 
                     method: 'POST', 
                     headers: {'Content-Type': 'application/json'}, 
-                    body: JSON.stringify({ initData: tg.initData, profile_id: profile_id }) 
+                    body: JSON.stringify({ initData: tg.initData, profile_id: profile_id, mode: mode }) 
                 });
                 
                 if (pRes.ok) {
@@ -74,8 +73,7 @@
                         if(f.any_tags) f.any_tags.forEach(t => { if(t in stateMap) stateMap[t] = 3; });
                     }
                 } else {
-                    document.getElementById('error-msg').innerText = "Warning: Failed to load existing settings.";
-                    document.getElementById('error-msg').style.display = 'block';
+                    document.getElementById('error-msg').innerText = "Make your selections below:";
                 }
             } catch (e) {
                 console.error(e);

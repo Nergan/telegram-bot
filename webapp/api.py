@@ -2,7 +2,7 @@ import os
 import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from core.config import AVAILABLE_TAGS
 from core.security import validate_webapp_data
@@ -13,13 +13,18 @@ from bot.helpers import send_profile
 
 router = APIRouter()
 
+# Defaults are critical to prevent FastAPI 422 Errors on incomplete JS payloads
 class WebAppPayload(BaseModel):
-    initData: str; mode: str; profile_id: str; tags: Optional[List[str]] = None
-    require_tags: Optional[List[str]] = None; exclude_tags: Optional[List[str]] = None; any_tags: Optional[List[str]] = None
+    initData: str
+    mode: str
+    profile_id: str
+    tags: List[str] = Field(default_factory=list)
+    require_tags: List[str] = Field(default_factory=list)
+    exclude_tags: List[str] = Field(default_factory=list)
+    any_tags: List[str] = Field(default_factory=list)
 
 @router.get("/webapp", response_class=HTMLResponse)
 async def serve_webapp():
-    # Injects the JSON array directly into the HTML to avoid frontend fetch/CORS errors completely.
     with open(os.path.join(os.path.dirname(__file__), "static", "index.html"), "r", encoding="utf-8") as f:
         html = f.read()
     return html.replace("{{AVAILABLE_TAGS_JSON}}", json.dumps(AVAILABLE_TAGS))
@@ -45,7 +50,7 @@ async def update_tags(payload: WebAppPayload):
         
     active = await Database.get_active_profile(user_id)
     if active and active['public_uuid'] == payload.profile_id:
-        await bot.send_message(user_id, "✅ Settings updated from WebApp!")
+        await bot.send_message(user_id, "✅ Settings updated!")
         await send_profile(user_id, active, main_menu_kb(active['public_uuid']), is_main_menu=True)
         
     return {"status": "ok"}

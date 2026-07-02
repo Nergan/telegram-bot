@@ -46,7 +46,7 @@ class Database:
             "tags": [],
             "filters": {"require_tags": [], "exclude_tags": [], "any_tags": []},
             "text": None,
-            "media": None, # dict: {"type": str, "file_id": str}
+            "media": [], # List of {"type": str, "file_id": str} up to 10
             "public_contact": None,
             "private_contact": None,
             "is_active": False,
