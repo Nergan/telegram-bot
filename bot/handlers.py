@@ -6,6 +6,7 @@ from bot.keyboards import main_menu_kb, profiles_list_kb, profile_management_kb,
 from core.database import Database
 
 router = Router()
+creating_profiles_users = set()
 
 def format_profile(profile_data: dict) -> str:
     text = f"<b>Profile ID:</b> <code>{profile_data.get('public_uuid')}</code>\n\n"
@@ -59,23 +60,37 @@ async def search_cmd(message: types.Message):
 async def main_menu_callback(callback: types.CallbackQuery):
     await callback.message.edit_text("Main Menu:", reply_markup=main_menu_kb())
 
-@router.callback_query(F.data == "my_profiles")
+@router.callback_query(F.data.in_({"my_profile", "my_profiles"}))
 async def my_profiles_callback(callback: types.CallbackQuery | types.Message):
     user_id = callback.from_user.id
+    
+    # Сразу отправляем callback.answer с текстом, чтобы убрать спиннер загрузки кнопки 
+    # и показать пользователю, что запрос принят.
+    if isinstance(callback, types.CallbackQuery):
+        await callback.answer("Loading your profiles...", show_alert=False)
+        
+    # Защита от дребезга контактов (double-click):
+    # Если пользователь уже находится в процессе создания профиля, игнорируем повторный вызов
+    if user_id in creating_profiles_users:
+        return
+
     cursor = Database.db.profiles.find({"user_id": user_id, "is_deleted": False})
     profiles = await cursor.to_list(length=10)
     
     if not profiles:
-        await Database.create_profile(user_id)
-        cursor = Database.db.profiles.find({"user_id": user_id, "is_deleted": False})
-        profiles = await cursor.to_list(length=10)
+        creating_profiles_users.add(user_id)  # Блокируем новые запросы от этого пользователя
+        try:
+            await Database.create_profile(user_id)
+            cursor = Database.db.profiles.find({"user_id": user_id, "is_deleted": False})
+            profiles = await cursor.to_list(length=10)
+        finally:
+            creating_profiles_users.discard(user_id)  # Обязательно снимаем блокировку в блоке finally
         
     text = "👤 <b>Your Profiles</b>\nManage your identities below. Only one can be Active for browsing."
     kb = profiles_list_kb(profiles)
     
     if isinstance(callback, types.CallbackQuery):
         await callback.message.edit_text(text, reply_markup=kb)
-        await callback.answer()
     else:
         await callback.answer(text, reply_markup=kb)
 

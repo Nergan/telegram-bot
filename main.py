@@ -54,5 +54,8 @@ async def bot_webhook(secret: str, request: Request):
         
     update_data = await request.json()
     update = Update.model_validate(update_data, context={"bot": bot})
-    await dp.feed_update(bot, update)
+    
+    # Запускаем обработку асинхронно в фоне, мгновенно возвращая 200 OK в Telegram
+    asyncio.create_task(dp.feed_update(bot, update))
+    
     return {"ok": True}
