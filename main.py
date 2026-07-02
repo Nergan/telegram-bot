@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from aiogram.types import Update
 
-from core.config import WEBHOOK_URL, TOKEN  # WEBHOOK_PATH больше не нужен
+from core.config import WEBHOOK_URL, TOKEN, WEBHOOK_SECRET  # Импортируем WEBHOOK_SECRET
 from core.database import Database
 from bot.bot_setup import bot, dp
 from bot.handlers import router as bot_router
@@ -19,18 +19,10 @@ async def lifespan(app: FastAPI):
     # 1. Connect DB
     Database.connect()
     
-    # 2. Setup Webhook
-    webhook_url = f"{WEBHOOK_URL}/webhook/{TOKEN}"
+    # 2. Setup Webhook (Используем секретную строку вместо токена в URL)
+    webhook_url = f"{WEBHOOK_URL}/webhook/{WEBHOOK_SECRET}"
     await bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-    
-    # masked token
-    if ":" in TOKEN:
-        bot_id, _ = TOKEN.split(":", 1)
-        masked_token = f"{bot_id}:***"
-    else:
-        masked_token = "***"
-        
-    logger.info(f"Webhook set to {WEBHOOK_URL}/webhook/{masked_token}")
+    logger.info("Webhook successfully registered with a secure secret path.")
     
     yield
     
@@ -44,18 +36,15 @@ app.include_router(webapp_router)
 
 @app.get("/")
 @app.head("/")
-async def health_check():
-    """Корневой эндпоинт для проверок работоспособности (Render Health Checks)"""
-    return {"status": "ok", "message": "Telegram Bot is running"}
+async def root():
+    """Эндпоинт для проверок работоспособности (Render Health Checks)"""
+    return {"status": "ok", "message": "Bot is running"}
 
-@app.post("/webhook/{token}")
-async def bot_webhook(token: str, request: Request):
-    """
-    Эндпоинт для получения обновлений от Telegram.
-    Использование параметра {token} защищает от проблем с парсингом двоеточия.
-    """
-    if token != TOKEN:
-        raise HTTPException(status_code=403, detail="Invalid token")
+@app.post("/webhook/{secret}")
+async def bot_webhook(secret: str, request: Request):
+    """Принимаем обновления только по секретному пути, проверяя его на валидность"""
+    if secret != WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid webhook secret")
         
     update_data = await request.json()
     update = Update.model_validate(update_data, context={"bot": bot})
