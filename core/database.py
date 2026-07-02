@@ -19,7 +19,6 @@ class Database:
 
     @classmethod
     async def log_action(cls, user_id: int, action_type: str, data: dict):
-        """Universal logging function."""
         await cls.db.logs.insert_one({
             "timestamp": datetime.datetime.now(datetime.timezone.utc),
             "user_id": user_id,
@@ -28,22 +27,38 @@ class Database:
         })
 
     @classmethod
+    async def get_or_create_active_profile(cls, user_id: int) -> dict:
+        """Ensures the user has an active profile to display on the dashboard."""
+        active = await cls.db.profiles.find_one({"user_id": user_id, "is_active": True})
+        if active: return active
+        
+        # If no active profile, check if they have any profile at all and activate it
+        any_profile = await cls.db.profiles.find_one({"user_id": user_id})
+        if any_profile:
+            await cls.set_active_profile(user_id, any_profile['public_uuid'])
+            return await cls.db.profiles.find_one({"public_uuid": any_profile['public_uuid']})
+            
+        # Create a brand new profile
+        return await cls.create_profile(user_id)
+
+    @classmethod
     async def create_profile(cls, user_id: int) -> dict:
         public_uuid = uuid.uuid4().hex[:8]
         profile = {
             "user_id": user_id,
             "public_uuid": public_uuid,
             "tags": [],
+            "filters": {"require_tags": [], "exclude_tags": [], "any_tags": []},
             "text": None,
-            "media": None,
+            "media": None, # dict: {type, file_id}
+            "public_contact": None,
+            "private_contact": None,
             "is_active": False,
             "is_hidden": False,
-            "is_deleted": False,
             "created_at": datetime.datetime.now(datetime.timezone.utc)
         }
         
-        # If user has no active profiles, make this one active
-        active_count = await cls.db.profiles.count_documents({"user_id": user_id, "is_active": True, "is_deleted": False})
+        active_count = await cls.db.profiles.count_documents({"user_id": user_id, "is_active": True})
         if active_count == 0:
             profile["is_active"] = True
 
@@ -53,20 +68,23 @@ class Database:
 
     @classmethod
     async def set_active_profile(cls, user_id: int, profile_uuid: str):
-        """Sets one profile as active, deactivates all others for the user."""
-        await cls.db.profiles.update_many(
-            {"user_id": user_id},
-            {"$set": {"is_active": False}}
-        )
-        await cls.db.profiles.update_one(
-            {"user_id": user_id, "public_uuid": profile_uuid},
-            {"$set": {"is_active": True}}
-        )
+        await cls.db.profiles.update_many({"user_id": user_id}, {"$set": {"is_active": False}})
+        await cls.db.profiles.update_one({"user_id": user_id, "public_uuid": profile_uuid}, {"$set": {"is_active": True}})
 
     @classmethod
     async def get_active_profile(cls, user_id: int):
-        return await cls.db.profiles.find_one({"user_id": user_id, "is_active": True, "is_deleted": False})
+        return await cls.db.profiles.find_one({"user_id": user_id, "is_active": True})
 
     @classmethod
     async def get_profile_by_uuid(cls, public_uuid: str):
-        return await cls.db.profiles.find_one({"public_uuid": public_uuid, "is_deleted": False})
+        return await cls.db.profiles.find_one({"public_uuid": public_uuid})
+        
+    @classmethod
+    async def delete_profile(cls, user_id: int, public_uuid: str):
+        """Hard deletes the profile. Automatically activates another if available."""
+        await cls.db.profiles.delete_one({"user_id": user_id, "public_uuid": public_uuid})
+        active = await cls.db.profiles.find_one({"user_id": user_id, "is_active": True})
+        if not active:
+            any_profile = await cls.db.profiles.find_one({"user_id": user_id})
+            if any_profile:
+                await cls.set_active_profile(user_id, any_profile['public_uuid'])

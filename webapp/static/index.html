@@ -9,17 +9,11 @@
         body { font-family: sans-serif; background-color: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); padding: 15px; margin: 0; }
         .search-container { margin-bottom: 15px; }
         input[type="text"] { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--tg-theme-hint-color, #ccc); background: var(--tg-theme-secondary-bg-color, #f4f4f4); color: var(--tg-theme-text-color); box-sizing: border-box; }
-        
         .tag { display: inline-block; padding: 8px 12px; margin: 5px; border-radius: 15px; background-color: var(--tg-theme-secondary-bg-color, #e0e0e0); cursor: pointer; transition: 0.2s; user-select: none; font-size: 14px;}
-        
-        /* Edit Mode Styles */
         .tag.selected { background-color: var(--tg-theme-button-color, #3390ec); color: var(--tg-theme-button-text-color, #ffffff); }
-        
-        /* Filter Mode Styles */
-        .tag.require { background-color: #4CAF50; color: white; } /* Green */
-        .tag.exclude { background-color: #F44336; color: white; } /* Red */
-        .tag.any { background-color: #2196F3; color: white; } /* Blue */
-
+        .tag.require { background-color: #4CAF50; color: white; } 
+        .tag.exclude { background-color: #F44336; color: white; } 
+        .tag.any { background-color: #2196F3; color: white; } 
         #legend { font-size: 12px; color: var(--tg-theme-hint-color, #888); margin-bottom: 15px; }
         .hidden { display: none !important; }
     </style>
@@ -41,7 +35,7 @@
         const profile_id = urlParams.get('profile_id');
         
         let allTags = [];
-        let stateMap = {}; // system_name -> state (0:neutral, 1:require, 2:exclude, 3:any / 0:unselected, 1:selected)
+        let stateMap = {}; 
 
         if(mode === 'edit') {
             document.getElementById('title').innerText = 'Edit Profile Tags';
@@ -52,9 +46,31 @@
         }
 
         async function init() {
-            const res = await fetch('/api/tags');
-            const data = await res.json();
+            // Fetch predefined tags
+            let res = await fetch('/api/tags');
+            let data = await res.json();
             allTags = data.tags;
+            
+            // Fetch user's existing selections
+            let profileRes = await fetch('/api/get_profile_data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ initData: tg.initData, profile_id: profile_id })
+            });
+            let profileData = await profileRes.json();
+            
+            // Pre-fill state map
+            allTags.forEach(tag => stateMap[tag.id] = 0);
+            
+            if(mode === 'edit') {
+                profileData.tags.forEach(t => { if(t in stateMap) stateMap[t] = 1; });
+            } else {
+                let f = profileData.filters;
+                if(f.require_tags) f.require_tags.forEach(t => { if(t in stateMap) stateMap[t] = 1; });
+                if(f.exclude_tags) f.exclude_tags.forEach(t => { if(t in stateMap) stateMap[t] = 2; });
+                if(f.any_tags) f.any_tags.forEach(t => { if(t in stateMap) stateMap[t] = 3; });
+            }
+
             renderTags();
         }
 
@@ -64,12 +80,18 @@
 
             allTags.forEach(tag => {
                 const el = document.createElement('div');
-                el.className = 'tag';
                 el.innerText = tag.display;
                 el.dataset.id = tag.id;
                 el.dataset.aliases = tag.aliases.join(' ').toLowerCase();
                 
-                stateMap[tag.id] = 0; // default state
+                el.className = 'tag';
+                let state = stateMap[tag.id];
+                if(mode === 'edit' && state === 1) el.classList.add('selected');
+                else if(mode === 'filter') {
+                    if(state === 1) el.classList.add('require');
+                    if(state === 2) el.classList.add('exclude');
+                    if(state === 3) el.classList.add('any');
+                }
 
                 el.onclick = () => handleTagClick(el, tag.id);
                 container.appendChild(el);
@@ -81,43 +103,33 @@
                 stateMap[tagId] = stateMap[tagId] === 1 ? 0 : 1;
                 el.className = `tag ${stateMap[tagId] === 1 ? 'selected' : ''}`;
             } else {
-                stateMap[tagId] = (stateMap[tagId] + 1) % 4; // 0->1->2->3->0
+                stateMap[tagId] = (stateMap[tagId] + 1) % 4; 
                 el.className = 'tag';
                 if(stateMap[tagId] === 1) el.classList.add('require');
                 if(stateMap[tagId] === 2) el.classList.add('exclude');
                 if(stateMap[tagId] === 3) el.classList.add('any');
             }
-            updateMainButton();
-        }
-
-        function updateMainButton() {
             tg.MainButton.setText("Save & Apply");
             tg.MainButton.show();
         }
 
-        // Search logic
         document.getElementById('searchInput').addEventListener('input', (e) => {
             const query = e.target.value.toLowerCase();
             document.querySelectorAll('.tag').forEach(el => {
                 const display = el.innerText.toLowerCase();
                 const aliases = el.dataset.aliases;
-                if(display.includes(query) || aliases.includes(query)) {
-                    el.classList.remove('hidden');
-                } else {
-                    el.classList.add('hidden');
-                }
+                if(display.includes(query) || aliases.includes(query)) el.classList.remove('hidden');
+                else el.classList.add('hidden');
             });
         });
 
         tg.MainButton.onClick(async () => {
-            let endpoint = '/api/update_edit';
-            let payload = { initData: tg.initData, mode: mode };
+            let endpoint = mode === 'edit' ? '/api/update_edit' : '/api/update_filter';
+            let payload = { initData: tg.initData, mode: mode, profile_id: profile_id };
 
             if(mode === 'edit') {
-                payload.profile_id = profile_id;
                 payload.tags = Object.keys(stateMap).filter(k => stateMap[k] === 1);
             } else {
-                endpoint = '/api/update_filter';
                 payload.require_tags = Object.keys(stateMap).filter(k => stateMap[k] === 1);
                 payload.exclude_tags = Object.keys(stateMap).filter(k => stateMap[k] === 2);
                 payload.any_tags = Object.keys(stateMap).filter(k => stateMap[k] === 3);
