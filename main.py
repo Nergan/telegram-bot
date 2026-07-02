@@ -20,11 +20,17 @@ dp.include_router(bot_router)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 1. Connect DB
     Database.connect()
     await setup_bot_commands()
     
+    # Указываем Telegram явно присылать и сообщения, и нажатия кнопок
     webhook_url = f"{WEBHOOK_URL}/webhook/{WEBHOOK_SECRET}"
-    await bot.set_webhook(url=webhook_url, drop_pending_updates=True)
+    await bot.set_webhook(
+        url=webhook_url, 
+        drop_pending_updates=True,
+        allowed_updates=["message", "callback_query"]  # <-- ДОБАВИТЬ ЭТУ СТРОКУ
+    )
     logger.info("Webhook registered and commands updated.")
     
     yield
