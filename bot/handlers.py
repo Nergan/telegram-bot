@@ -1,267 +1,228 @@
 import uuid
 from aiogram import Router, F, types
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from bot.bot_setup import bot
-from bot.states import ProfileSetup
-from bot.keyboards import dashboard_kb, profiles_list_kb, profile_management_kb, profile_card_kb, profile_editor_kb
+from bot.states import ProfileSetup, ContactRequest
+from bot.keyboards import *
+from bot.helpers import send_profile
 from core.database import Database
 
 router = Router()
 
-def truncate(text: str, limit: int = 800) -> str:
-    if not text: return ""
-    return text if len(text) <= limit else text[:limit-3] + "..."
-
-def format_profile(profile: dict, is_dashboard: bool = False) -> str:
-    text = f"<b>Profile ID:</b> <code>{profile['public_uuid']}</code>\n\n"
-    
-    if is_dashboard:
-        text = f"🏠 <b>YOUR DASHBOARD</b>\n" + text
-        
-    if profile.get('text'):
-        text += f"📝 {truncate(profile['text'])}\n\n"
-        
-    if profile.get('public_contact'):
-        text += f"🌐 <b>Public Contact:</b> {truncate(profile['public_contact'], 100)}\n\n"
-        
-    if profile.get('tags'):
-        text += f"🏷️ <b>Tags:</b> #{' #'.join(profile['tags'])}\n"
-        
-    if is_dashboard:
-        filters = profile.get("filters", {})
-        if any(filters.values()):
-            text += "\n⚙️ <b>Active Filters:</b>\n"
-            if filters.get("require_tags"): text += f"🟩 Must have: {', '.join(filters['require_tags'])}\n"
-            if filters.get("exclude_tags"): text += f"🟥 Exclude: {', '.join(filters['exclude_tags'])}\n"
-            if filters.get("any_tags"): text += f"🟦 Any of: {', '.join(filters['any_tags'])}\n"
-            
-    return text
-
-async def send_or_edit_profile(message_or_callback, profile: dict, kb: types.InlineKeyboardMarkup, is_dashboard: bool = False):
-    """Universal function to handle sending text or media profiles without errors."""
-    text = format_profile(profile, is_dashboard)
-    is_callback = isinstance(message_or_callback, types.CallbackQuery)
-    msg = message_or_callback.message if is_callback else message_or_callback
-    
-    media_dict = profile.get("media")
-    try:
-        if is_callback:
-            if media_dict:
-                media_type = media_dict['type']
-                file_id = media_dict['file_id']
-                # Requires Aiogram InputMedia mapping
-                if media_type == 'photo': media = types.InputMediaPhoto(media=file_id, caption=text)
-                elif media_type == 'video': media = types.InputMediaVideo(media=file_id, caption=text)
-                await msg.edit_media(media=media, reply_markup=kb)
-            else:
-                await msg.edit_text(text, reply_markup=kb)
-        else:
-            if media_dict:
-                if media_dict['type'] == 'photo': await msg.answer_photo(photo=media_dict['file_id'], caption=text, reply_markup=kb)
-                elif media_dict['type'] == 'video': await msg.answer_video(video=media_dict['file_id'], caption=text, reply_markup=kb)
-                elif media_dict['type'] == 'voice': await msg.answer_voice(voice=media_dict['file_id'], caption=text, reply_markup=kb)
-            else:
-                await msg.answer(text, reply_markup=kb)
-    except Exception:
-        # Fallback if message types clash (e.g. text -> photo edit)
-        if is_callback: await msg.delete()
-        if media_dict:
-            if media_dict['type'] == 'photo': await msg.answer_photo(photo=media_dict['file_id'], caption=text, reply_markup=kb)
-            elif media_dict['type'] == 'video': await msg.answer_video(video=media_dict['file_id'], caption=text, reply_markup=kb)
-            elif media_dict['type'] == 'voice': await msg.answer_voice(voice=media_dict['file_id'], caption=text, reply_markup=kb)
-        else:
-            await msg.answer(text, reply_markup=kb)
-
-# --- DASHBOARD & COMMANDS ---
-
 @router.message(CommandStart())
-@router.message(Command("menu"))
-@router.message(Command("dashboard"))
-async def start_cmd(message: types.Message, state: FSMContext):
+@router.message(F.text == "🏠 Dashboard")
+async def show_dashboard(message: types.Message, state: FSMContext):
     await state.clear()
-    args = message.text.split()
-    if len(args) > 1 and args[0] == "/start":
-        target_uuid = args[1]
-        profile = await Database.get_profile_by_uuid(target_uuid)
-        if profile and not profile.get("is_hidden"):
-            if profile['user_id'] == message.from_user.id:
-                await message.answer("This is your own profile! Here is its management card:")
-                await send_or_edit_profile(message, profile, profile_management_kb(profile))
-            else:
-                await send_or_edit_profile(message, profile, profile_card_kb(target_uuid))
-            return
-        else:
-            await message.answer("❌ Profile not found or is hidden.")
-            
     active_profile = await Database.get_or_create_active_profile(message.from_user.id)
-    await send_or_edit_profile(message, active_profile, dashboard_kb(active_profile['public_uuid']), is_dashboard=True)
+    await send_profile(message.chat.id, active_profile, dashboard_kb(active_profile['public_uuid']), is_dashboard=True)
 
-@router.callback_query(F.data == "dashboard")
-async def dashboard_callback(callback: types.CallbackQuery, state: FSMContext):
-    await state.clear()
-    active_profile = await Database.get_or_create_active_profile(callback.from_user.id)
-    await send_or_edit_profile(callback, active_profile, dashboard_kb(active_profile['public_uuid']), is_dashboard=True)
-    await callback.answer()
+# --- EDITING ROUTING ---
 
-# --- PROFILE EDITING (FSM) ---
+@router.message(F.text == "📝 Edit Info")
+async def edit_info_menu(message: types.Message):
+    await message.answer("What would you like to edit?", reply_markup=edit_info_menu_kb())
 
-@router.callback_query(F.data.startswith("edit_menu_"))
-async def edit_menu_callback(callback: types.CallbackQuery):
-    prof_uuid = callback.data.split("_")[2]
-    await callback.message.edit_reply_markup(reply_markup=profile_editor_kb(prof_uuid))
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("edit_field_"))
-async def edit_field_callback(callback: types.CallbackQuery, state: FSMContext):
-    parts = callback.data.split("_")
-    field = parts[2]
-    prof_uuid = parts[3]
-    
-    await state.update_data(editing_uuid=prof_uuid)
-    
-    if field == "bio":
+@router.message(F.text.in_({"✏️ Bio", "🌐 Public Contact", "🔒 Private Contact"}))
+async def init_edit_text(message: types.Message, state: FSMContext):
+    if message.text == "✏️ Bio":
         await state.set_state(ProfileSetup.waiting_for_bio)
-        await callback.message.answer("📝 Send your new Bio (text):")
-    elif field == "media":
-        await state.set_state(ProfileSetup.waiting_for_media)
-        await callback.message.answer("📸 Send a Photo, Video, or Voice message to attach to your profile:")
-    elif field == "pub":
+        await message.answer("Send your new Bio:", reply_markup=edit_fsm_kb())
+    elif message.text == "🌐 Public Contact":
         await state.set_state(ProfileSetup.waiting_for_pub_contact)
-        await callback.message.answer("🌐 Send your Public Contact (visible to everyone):")
-    elif field == "priv":
+        await message.answer("Send your Public Contact (visible to all):", reply_markup=edit_fsm_kb())
+    elif message.text == "🔒 Private Contact":
         await state.set_state(ProfileSetup.waiting_for_priv_contact)
-        await callback.message.answer("🔒 Send your Private Contact (shared only upon request approval):")
-        
-    await callback.answer()
+        await message.answer("Send your Private Contact (shared only via request):", reply_markup=edit_fsm_kb())
+
+@router.message(F.text == "📸 Edit Media")
+async def init_edit_media(message: types.Message, state: FSMContext):
+    await state.set_state(ProfileSetup.waiting_for_media)
+    await state.update_data(temp_media=[], temp_voice=None)
+    await message.answer(
+        "Send up to 5 photos/videos, and/or 1 voice message.\nWhen finished, click '✅ Done'.", 
+        reply_markup=edit_media_fsm_kb()
+    )
+
+# --- FSM ACTIONS (Cancel / Clear) ---
+
+@router.message(F.text == "❌ Cancel", flags={"state": "*"})
+async def fsm_cancel(message: types.Message, state: FSMContext):
+    await message.answer("❌ Action cancelled.")
+    await show_dashboard(message, state)
+
+@router.message(F.text == "🗑️ Clear Field")
+async def fsm_clear(message: types.Message, state: FSMContext):
+    curr_state = await state.get_state()
+    field = None
+    if curr_state == ProfileSetup.waiting_for_bio: field = "text"
+    elif curr_state == ProfileSetup.waiting_for_pub_contact: field = "public_contact"
+    elif curr_state == ProfileSetup.waiting_for_priv_contact: field = "private_contact"
+    elif curr_state == ProfileSetup.waiting_for_media: field = "media"
+    
+    if field:
+        active_prof = await Database.get_active_profile(message.from_user.id)
+        val = {"items": [], "voice": None} if field == "media" else None
+        await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {field: val}})
+        await message.answer("🗑️ Cleared.")
+    await show_dashboard(message, state)
+
+# --- FSM CAPTURE ---
 
 @router.message(ProfileSetup.waiting_for_bio)
 @router.message(ProfileSetup.waiting_for_pub_contact)
 @router.message(ProfileSetup.waiting_for_priv_contact)
-async def capture_text_fields(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    uuid = data.get('editing_uuid')
-    current_state = await state.get_state()
+async def capture_text(message: types.Message, state: FSMContext):
+    if message.text in ["❌ Cancel", "🗑️ Clear Field"]: return
     
-    field_map = {
-        ProfileSetup.waiting_for_bio: "text",
-        ProfileSetup.waiting_for_pub_contact: "public_contact",
-        ProfileSetup.waiting_for_priv_contact: "private_contact"
-    }
-    
-    field = field_map[current_state]
-    await Database.db.profiles.update_one({"public_uuid": uuid}, {"$set": {field: message.text}})
-    await message.answer("✅ Updated successfully!")
-    
-    # Return to dashboard automatically
-    active_profile = await Database.get_or_create_active_profile(message.from_user.id)
-    await send_or_edit_profile(message, active_profile, dashboard_kb(active_profile['public_uuid']), is_dashboard=True)
-    await state.clear()
+    curr_state = await state.get_state()
+    field = "text" if curr_state == ProfileSetup.waiting_for_bio else \
+            "public_contact" if curr_state == ProfileSetup.waiting_for_pub_contact else "private_contact"
+            
+    active_prof = await Database.get_active_profile(message.from_user.id)
+    await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {field: message.text}})
+    await message.answer("✅ Saved!")
+    await show_dashboard(message, state)
 
 @router.message(ProfileSetup.waiting_for_media)
-async def capture_media_field(message: types.Message, state: FSMContext):
+async def capture_media(message: types.Message, state: FSMContext):
+    if message.text in ["❌ Cancel", "🗑️ Clear Field"]: return
     data = await state.get_data()
-    uuid = data.get('editing_uuid')
+    temp_media = data.get("temp_media", [])
+    temp_voice = data.get("temp_voice")
     
-    media_data = None
-    if message.photo: media_data = {"type": "photo", "file_id": message.photo[-1].file_id}
-    elif message.video: media_data = {"type": "video", "file_id": message.video.file_id}
-    elif message.voice: media_data = {"type": "voice", "file_id": message.voice.file_id}
-    else:
-        await message.answer("Please send a valid media type (Photo, Video, Voice).")
-        return
-        
-    await Database.db.profiles.update_one({"public_uuid": uuid}, {"$set": {"media": media_data}})
-    await message.answer("✅ Media updated!")
-    active_profile = await Database.get_or_create_active_profile(message.from_user.id)
-    await send_or_edit_profile(message, active_profile, dashboard_kb(active_profile['public_uuid']), is_dashboard=True)
-    await state.clear()
+    if message.text == "✅ Done (Save)":
+        active_prof = await Database.get_active_profile(message.from_user.id)
+        media_doc = {"items": temp_media[:5], "voice": temp_voice}
+        await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": media_doc}})
+        await message.answer("✅ Media saved!")
+        return await show_dashboard(message, state)
 
-# --- PROFILE MANAGEMENT ---
+    if message.photo: temp_media.append({"type": "photo", "file_id": message.photo[-1].file_id})
+    elif message.video: temp_media.append({"type": "video", "file_id": message.video.file_id})
+    elif message.voice: temp_voice = message.voice.file_id
+    
+    await state.update_data(temp_media=temp_media, temp_voice=temp_voice)
 
-@router.callback_query(F.data == "my_profiles")
-async def my_profiles_callback(callback: types.CallbackQuery):
-    cursor = Database.db.profiles.find({"user_id": callback.from_user.id})
+# --- PROFILES MANAGEMENT ---
+
+@router.message(F.text == "👥 Profiles")
+async def profiles_menu(message: types.Message):
+    cursor = Database.db.profiles.find({"user_id": message.from_user.id})
     profiles = await cursor.to_list(length=10)
     
-    if not profiles:
-        await Database.get_or_create_active_profile(callback.from_user.id)
-        cursor = Database.db.profiles.find({"user_id": callback.from_user.id})
-        profiles = await cursor.to_list(length=10)
+    text = "👥 <b>Manage Profiles</b>\nClick an ID below to manage it:\n\n"
+    for p in profiles:
+        status = "🌟 Active" if p.get("is_active") else "⚪ Inactive"
+        if p.get("is_hidden"): status += " 👻 Hidden"
+        text += f"• <code>{p['public_uuid']}</code> [{status}] 👉 /manage_{p['public_uuid']}\n"
         
-    text = "👥 <b>Manage Profiles</b>\nSelect an identity below."
-    try: await callback.message.edit_text(text, reply_markup=profiles_list_kb(profiles))
-    except Exception: await callback.message.answer(text, reply_markup=profiles_list_kb(profiles))
-    await callback.answer()
+    text += "\nOr /create_profile to make a new one."
+    await message.answer(text, reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="🏠 Dashboard")]], resize_keyboard=True))
 
-@router.callback_query(F.data == "create_profile")
-async def create_profile_callback(callback: types.CallbackQuery):
-    await Database.create_profile(callback.from_user.id)
-    await my_profiles_callback(callback)
+@router.message(Command("create_profile"))
+async def create_profile_cmd(message: types.Message):
+    await Database.create_profile(message.from_user.id)
+    await message.answer("✅ New profile created!")
+    await profiles_menu(message)
 
-@router.callback_query(F.data.startswith("manage_prof_"))
-async def manage_prof_callback(callback: types.CallbackQuery):
-    prof_uuid = callback.data.split("_")[2]
+@router.message(F.text.startswith("/manage_"))
+async def manage_prof(message: types.Message, state: FSMContext):
+    prof_uuid = message.text.split("_")[1]
     profile = await Database.get_profile_by_uuid(prof_uuid)
-    if not profile or profile['user_id'] != callback.from_user.id:
-        return await callback.answer("Profile not found.", show_alert=True)
-    await send_or_edit_profile(callback, profile, profile_management_kb(profile))
-    await callback.answer()
+    if not profile or profile['user_id'] != message.from_user.id:
+        return await message.answer("❌ Profile not found.")
+    
+    await state.update_data(managing_uuid=prof_uuid)
+    await send_profile(message.chat.id, profile, manage_action_kb())
 
-@router.callback_query(F.data.startswith("set_active_"))
-async def set_active_callback(callback: types.CallbackQuery):
-    prof_uuid = callback.data.split("_")[2]
-    await Database.set_active_profile(callback.from_user.id, prof_uuid)
-    await callback.answer("🌟 Profile Activated!")
-    await dashboard_callback(callback, FSMContext) # Redirect to dash
-
-@router.callback_query(F.data.startswith("regen_id_"))
-async def regen_id_callback(callback: types.CallbackQuery):
-    prof_uuid = callback.data.split("_")[2]
-    new_uuid = uuid.uuid4().hex[:8]
-    await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"public_uuid": new_uuid}})
-    await callback.answer("🔄 ID Regenerated!")
-    callback.data = f"manage_prof_{new_uuid}"
-    await manage_prof_callback(callback)
-
-@router.callback_query(F.data.startswith("delete_prof_"))
-async def delete_prof_callback(callback: types.CallbackQuery):
-    prof_uuid = callback.data.split("_")[2]
-    await Database.delete_profile(callback.from_user.id, prof_uuid)
-    await callback.answer("🗑️ Profile Deleted.")
-    await my_profiles_callback(callback)
+@router.message(F.text.in_({"🌟 Set Active", "👁️ Toggle Vis", "🔄 Regen ID", "🗑️ Delete"}))
+async def manage_actions(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    prof_uuid = data.get("managing_uuid")
+    if not prof_uuid: return await show_dashboard(message, state)
+    
+    user_id = message.from_user.id
+    if message.text == "🌟 Set Active":
+        await Database.set_active_profile(user_id, prof_uuid)
+        await message.answer("🌟 Profile Activated!")
+        await show_dashboard(message, state)
+    elif message.text == "👁️ Toggle Vis":
+        p = await Database.get_profile_by_uuid(prof_uuid)
+        await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"is_hidden": not p.get('is_hidden', False)}})
+        await message.answer("👁️ Visibility toggled.")
+        await profiles_menu(message)
+    elif message.text == "🔄 Regen ID":
+        new_uuid = uuid.uuid4().hex[:8]
+        await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"public_uuid": new_uuid}})
+        await state.update_data(managing_uuid=new_uuid)
+        await message.answer(f"🔄 ID Regenerated: {new_uuid}")
+        p = await Database.get_profile_by_uuid(new_uuid)
+        await send_profile(message.chat.id, p, manage_action_kb())
+    elif message.text == "🗑️ Delete":
+        success = await Database.delete_profile(user_id, prof_uuid)
+        if success:
+            await message.answer("🗑️ Profile Deleted.")
+            await show_dashboard(message, state)
+        else:
+            await message.answer("❌ Cannot delete your only profile.")
 
 # --- BROWSING ---
 
-@router.message(Command("browse"))
-@router.callback_query(F.data == "browse_profiles" )
-async def start_browsing(event: types.Message | types.CallbackQuery):
-    await next_profile(event)
-
-@router.callback_query(F.data == "next_profile")
-async def next_profile(event: types.Message | types.CallbackQuery):
-    user_id = event.from_user.id
-    active_profile = await Database.get_active_profile(user_id)
-    if not active_profile:
-        msg = event.message if isinstance(event, types.CallbackQuery) else event
-        return await msg.answer("❌ You need an active profile to browse.")
-
-    filters = active_profile.get("filters", {})
-    and_clauses = [{"user_id": {"$ne": user_id}}, {"is_active": True}, {"is_hidden": False}]
+@router.message(F.text.in_({"🔍 Browse", "⏩ Next Profile"}))
+async def browse_next(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    active = await Database.get_active_profile(user_id)
     
+    filters = active.get("filters", {})
+    and_clauses = [{"user_id": {"$ne": user_id}}, {"is_active": True}, {"is_hidden": False}]
     if filters.get("require_tags"): and_clauses.append({"tags": {"$all": filters["require_tags"]}})
     if filters.get("exclude_tags"): and_clauses.append({"tags": {"$nin": filters["exclude_tags"]}})
     if filters.get("any_tags"): and_clauses.append({"tags": {"$in": filters["any_tags"]}})
         
-    pipeline = [{"$match": {"$and": and_clauses}}, {"$sample": {"size": 1}}]
-    cursor = Database.db.profiles.aggregate(pipeline)
+    cursor = Database.db.profiles.aggregate([{"$match": {"$and": and_clauses}}, {"$sample": {"size": 1}}])
     profiles = await cursor.to_list(length=1)
     
-    if not profiles:
-        if isinstance(event, types.CallbackQuery): await event.answer("No matching profiles found!", show_alert=True)
-        else: await event.answer("No matching profiles found!")
-        return
+    if not profiles: return await message.answer("No matching profiles found!", reply_markup=dashboard_kb(active['public_uuid']))
 
-    profile = profiles[0]
-    await send_or_edit_profile(event, profile, profile_card_kb(profile['public_uuid']))
-    if isinstance(event, types.CallbackQuery): await event.answer()
+    target = profiles[0]
+    await state.update_data(browse_uuid=target['public_uuid'])
+    await send_profile(message.chat.id, target, browse_kb())
+
+@router.message(F.text.in_({"💌 Request Contact", "🤝 Send Contact"}))
+async def init_contact(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    target_uuid = data.get("browse_uuid")
+    if not target_uuid: return await show_dashboard(message, state)
+    
+    action = "req" if "Request" in message.text else "send"
+    await state.update_data(target_uuid=target_uuid, action=action)
+    await state.set_state(ContactRequest.waiting_for_message)
+    await message.answer("Attach a message (or skip):", reply_markup=skip_message_kb())
+
+@router.callback_query(F.data == "skip_req_msg", ContactRequest.waiting_for_message)
+async def skip_contact_msg(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    await execute_contact_request(callback.from_user.id, state)
+    await callback.message.answer("✅ Request sent!", reply_markup=browse_kb())
+
+@router.message(ContactRequest.waiting_for_message)
+async def capture_contact_msg(message: types.Message, state: FSMContext):
+    await execute_contact_request(message.from_user.id, state, message)
+    await message.answer("✅ Request sent with message!", reply_markup=browse_kb())
+
+async def execute_contact_request(user_id: int, state: FSMContext, message=None):
+    data = await state.get_data()
+    target_prof = await Database.get_profile_by_uuid(data['target_uuid'])
+    if not target_prof: return
+    
+    req_id = uuid.uuid4().hex
+    req_doc = {"req_id": req_id, "initiator_id": user_id, "target_id": target_prof['user_id'], "action": data['action'], "status": "pending", "message": message.text if message else None}
+    await Database.db.contact_requests.insert_one(req_doc)
+    
+    initiator = await Database.get_active_profile(user_id)
+    text = f"🔔 <b>Contact Request!</b>\nFrom: {initiator['public_uuid']}\n"
+    if req_doc['message']: text += f"💬: {req_doc['message']}\n"
+    if data['action'] == "send": text = "🤝 <b>User shared contact!</b>\n" + text
+        
+    await bot.send_message(target_prof['user_id'], text, reply_markup=contact_decision_kb(req_id, is_sending=(data['action']=="send")))

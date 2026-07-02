@@ -3,146 +3,116 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tags Interface</title>
+    <title>Tags</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body { font-family: sans-serif; background-color: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); padding: 15px; margin: 0; }
-        .search-container { margin-bottom: 15px; }
-        input[type="text"] { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--tg-theme-hint-color, #ccc); background: var(--tg-theme-secondary-bg-color, #f4f4f4); color: var(--tg-theme-text-color); box-sizing: border-box; }
-        .tag { display: inline-block; padding: 8px 12px; margin: 5px; border-radius: 15px; background-color: var(--tg-theme-secondary-bg-color, #e0e0e0); cursor: pointer; transition: 0.2s; user-select: none; font-size: 14px;}
-        .tag.selected { background-color: var(--tg-theme-button-color, #3390ec); color: var(--tg-theme-button-text-color, #ffffff); }
+        input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ccc; background: var(--tg-theme-secondary-bg-color); color: var(--tg-theme-text-color); box-sizing: border-box; margin-bottom: 15px;}
+        .tag { display: inline-block; padding: 8px 12px; margin: 5px; border-radius: 15px; background-color: var(--tg-theme-secondary-bg-color); cursor: pointer; font-size: 14px;}
+        .tag.selected { background-color: var(--tg-theme-button-color); color: white; }
         .tag.require { background-color: #4CAF50; color: white; } 
         .tag.exclude { background-color: #F44336; color: white; } 
         .tag.any { background-color: #2196F3; color: white; } 
-        #legend { font-size: 12px; color: var(--tg-theme-hint-color, #888); margin-bottom: 15px; }
+        .section { margin-bottom: 20px; padding: 10px; border-radius: 10px; background: rgba(0,0,0,0.05); min-height: 50px;}
         .hidden { display: none !important; }
+        h4 { margin-top: 0; margin-bottom: 10px; }
     </style>
 </head>
 <body>
-    <h3 id="title">Tags</h3>
-    <div id="legend"></div>
-    <div class="search-container">
-        <input type="text" id="searchInput" placeholder="Search tags (e.g. coding, usa)...">
+    <h3 id="title">Tags Interface</h3>
+    <p id="legend" style="font-size: 12px; color: gray;"></p>
+    
+    <div class="section" id="sel-section">
+        <h4>Selected / Active</h4>
+        <div id="selected-container"></div>
     </div>
-    <div id="tags-container">Loading...</div>
+
+    <input type="text" id="searchInput" placeholder="Search available tags...">
+    
+    <div class="section">
+        <h4>Available</h4>
+        <div id="available-container"></div>
+    </div>
 
     <script>
-        const tg = window.Telegram.WebApp;
-        tg.expand();
-        
+        const tg = window.Telegram.WebApp; tg.expand();
         const urlParams = new URLSearchParams(window.location.search);
         const mode = urlParams.get('mode') || 'edit';
         const profile_id = urlParams.get('profile_id');
-        
-        let allTags = [];
-        let stateMap = {}; 
+        let allTags = []; let stateMap = {};
 
         if(mode === 'edit') {
             document.getElementById('title').innerText = 'Edit Profile Tags';
-            document.getElementById('legend').innerText = 'Tap to select tags for your profile.';
+            document.getElementById('legend').innerText = 'Tap to select.';
         } else {
             document.getElementById('title').innerText = 'Advanced Filter';
-            document.getElementById('legend').innerHTML = 'Tap to cycle logic: <br>🟩 Must have | 🟥 Must NOT have | 🟦 Can have any';
+            document.getElementById('legend').innerHTML = 'Tap to cycle: 🟩 Must have | 🟥 Exclude | 🟦 Any';
         }
 
         async function init() {
-            // Fetch predefined tags
-            let res = await fetch('/api/tags');
-            let data = await res.json();
-            allTags = data.tags;
+            let res = await fetch('/api/tags'); allTags = (await res.json()).tags;
+            let pRes = await fetch('/api/get_profile_data', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ initData: tg.initData, profile_id: profile_id }) });
+            let pData = await pRes.json();
             
-            // Fetch user's existing selections
-            let profileRes = await fetch('/api/get_profile_data', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ initData: tg.initData, profile_id: profile_id })
-            });
-            let profileData = await profileRes.json();
-            
-            // Pre-fill state map
-            allTags.forEach(tag => stateMap[tag.id] = 0);
-            
-            if(mode === 'edit') {
-                profileData.tags.forEach(t => { if(t in stateMap) stateMap[t] = 1; });
-            } else {
-                let f = profileData.filters;
+            allTags.forEach(t => stateMap[t.id] = 0);
+            if(mode === 'edit') { pData.tags.forEach(t => { if(t in stateMap) stateMap[t] = 1; }); } 
+            else {
+                let f = pData.filters;
                 if(f.require_tags) f.require_tags.forEach(t => { if(t in stateMap) stateMap[t] = 1; });
                 if(f.exclude_tags) f.exclude_tags.forEach(t => { if(t in stateMap) stateMap[t] = 2; });
                 if(f.any_tags) f.any_tags.forEach(t => { if(t in stateMap) stateMap[t] = 3; });
             }
-
             renderTags();
         }
 
         function renderTags() {
-            const container = document.getElementById('tags-container');
-            container.innerHTML = '';
+            const selCont = document.getElementById('selected-container');
+            const availCont = document.getElementById('available-container');
+            selCont.innerHTML = ''; availCont.innerHTML = '';
 
             allTags.forEach(tag => {
                 const el = document.createElement('div');
-                el.innerText = tag.display;
-                el.dataset.id = tag.id;
-                el.dataset.aliases = tag.aliases.join(' ').toLowerCase();
-                
+                el.innerText = tag.display; el.dataset.aliases = tag.aliases.join(' ').toLowerCase();
                 el.className = 'tag';
-                let state = stateMap[tag.id];
-                if(mode === 'edit' && state === 1) el.classList.add('selected');
+                let st = stateMap[tag.id];
+                
+                if(mode === 'edit' && st === 1) el.classList.add('selected');
                 else if(mode === 'filter') {
-                    if(state === 1) el.classList.add('require');
-                    if(state === 2) el.classList.add('exclude');
-                    if(state === 3) el.classList.add('any');
+                    if(st === 1) el.classList.add('require');
+                    if(st === 2) el.classList.add('exclude');
+                    if(st === 3) el.classList.add('any');
                 }
 
-                el.onclick = () => handleTagClick(el, tag.id);
-                container.appendChild(el);
+                el.onclick = () => {
+                    if(mode === 'edit') stateMap[tag.id] = st === 1 ? 0 : 1;
+                    else stateMap[tag.id] = (st + 1) % 4;
+                    tg.MainButton.setText("Save & Apply"); tg.MainButton.show();
+                    renderTags(); // Re-render to move element
+                };
+
+                if(st !== 0) selCont.appendChild(el); else availCont.appendChild(el);
             });
         }
 
-        function handleTagClick(el, tagId) {
-            if(mode === 'edit') {
-                stateMap[tagId] = stateMap[tagId] === 1 ? 0 : 1;
-                el.className = `tag ${stateMap[tagId] === 1 ? 'selected' : ''}`;
-            } else {
-                stateMap[tagId] = (stateMap[tagId] + 1) % 4; 
-                el.className = 'tag';
-                if(stateMap[tagId] === 1) el.classList.add('require');
-                if(stateMap[tagId] === 2) el.classList.add('exclude');
-                if(stateMap[tagId] === 3) el.classList.add('any');
-            }
-            tg.MainButton.setText("Save & Apply");
-            tg.MainButton.show();
-        }
-
         document.getElementById('searchInput').addEventListener('input', (e) => {
-            const query = e.target.value.toLowerCase();
-            document.querySelectorAll('.tag').forEach(el => {
-                const display = el.innerText.toLowerCase();
-                const aliases = el.dataset.aliases;
-                if(display.includes(query) || aliases.includes(query)) el.classList.remove('hidden');
+            const q = e.target.value.toLowerCase();
+            document.getElementById('available-container').querySelectorAll('.tag').forEach(el => {
+                if(el.innerText.toLowerCase().includes(q) || el.dataset.aliases.includes(q)) el.classList.remove('hidden');
                 else el.classList.add('hidden');
             });
         });
 
         tg.MainButton.onClick(async () => {
-            let endpoint = mode === 'edit' ? '/api/update_edit' : '/api/update_filter';
-            let payload = { initData: tg.initData, mode: mode, profile_id: profile_id };
-
-            if(mode === 'edit') {
-                payload.tags = Object.keys(stateMap).filter(k => stateMap[k] === 1);
-            } else {
-                payload.require_tags = Object.keys(stateMap).filter(k => stateMap[k] === 1);
-                payload.exclude_tags = Object.keys(stateMap).filter(k => stateMap[k] === 2);
-                payload.any_tags = Object.keys(stateMap).filter(k => stateMap[k] === 3);
+            let pay = { initData: tg.initData, mode: mode, profile_id: profile_id };
+            if(mode === 'edit') pay.tags = Object.keys(stateMap).filter(k => stateMap[k] === 1);
+            else {
+                pay.require_tags = Object.keys(stateMap).filter(k => stateMap[k] === 1);
+                pay.exclude_tags = Object.keys(stateMap).filter(k => stateMap[k] === 2);
+                pay.any_tags = Object.keys(stateMap).filter(k => stateMap[k] === 3);
             }
-
-            await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+            await fetch('/api/update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(pay) });
             tg.close();
         });
-
         init();
     </script>
 </body>
