@@ -19,10 +19,18 @@ async def lifespan(app: FastAPI):
     # 1. Connect DB
     Database.connect()
     
-    # 2. Setup Webhook (в Telegram передаем полный URL с токеном)
+    # 2. Setup Webhook
     webhook_url = f"{WEBHOOK_URL}/webhook/{TOKEN}"
     await bot.set_webhook(url=webhook_url, drop_pending_updates=True)
-    logger.info(f"Webhook set to {webhook_url}")
+    
+    # masked token
+    if ":" in TOKEN:
+        bot_id, _ = TOKEN.split(":", 1)
+        masked_token = f"{bot_id}:***"
+    else:
+        masked_token = "***"
+        
+    logger.info(f"Webhook set to {WEBHOOK_URL}/webhook/{masked_token}")
     
     yield
     
