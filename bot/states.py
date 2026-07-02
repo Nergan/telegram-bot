@@ -8,3 +8,4 @@ class ProfileSetup(StatesGroup):
     waiting_for_media = State()
     waiting_for_pub_contact = State()
     waiting_for_priv_contact = State()
+    waiting_for_delete_all = State()

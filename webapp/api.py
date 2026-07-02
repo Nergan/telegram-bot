@@ -13,7 +13,6 @@ from bot.helpers import send_profile
 
 router = APIRouter()
 
-# Defaults are critical to prevent FastAPI 422 Errors on incomplete JS payloads
 class WebAppPayload(BaseModel):
     initData: str
     mode: str
@@ -51,6 +50,7 @@ async def update_tags(payload: WebAppPayload):
     active = await Database.get_active_profile(user_id)
     if active and active['public_uuid'] == payload.profile_id:
         await bot.send_message(user_id, "✅ Settings updated!")
+        # Instantly render the fresh profile to the user via Telegram push!
         await send_profile(user_id, active, main_menu_kb(active['public_uuid']), is_main_menu=True)
         
     return {"status": "ok"}

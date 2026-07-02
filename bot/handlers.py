@@ -22,10 +22,8 @@ async def show_main_menu(message: types.Message, state: FSMContext):
 async def view_private_contacts(message: types.Message):
     active_prof = await Database.get_active_profile(message.from_user.id)
     priv = active_prof.get('private_contact')
-    if priv:
-        await message.answer(f"🔒 <b>Your Private Contacts:</b>\n\n{html.escape(priv)}")
-    else:
-        await message.answer("🔒 You have not set any Private Contacts yet.")
+    if priv: await message.answer(f"🔒 <b>Your Private Contacts:</b>\n\n{html.escape(priv)}")
+    else: await message.answer("🔒 You have not set any Private Contacts yet.")
 
 # --- EDITING ROUTING ---
 
@@ -40,19 +38,15 @@ async def init_edit_text(message: types.Message, state: FSMContext):
         await message.answer("Send your new Bio:", reply_markup=edit_fsm_kb())
     elif message.text == "🌐 Public Contacts":
         await state.set_state(ProfileSetup.waiting_for_pub_contact)
-        await message.answer("Send your Public Contacts (visible to all):", reply_markup=edit_fsm_kb())
+        await message.answer("Send your Public Contacts:", reply_markup=edit_fsm_kb())
     elif message.text == "🔒 Private Contacts":
         await state.set_state(ProfileSetup.waiting_for_priv_contact)
-        await message.answer("Send your Private Contacts (shared only via request):", reply_markup=edit_fsm_kb())
+        await message.answer("Send your Private Contacts:", reply_markup=edit_fsm_kb())
 
 @router.message(F.text == "📸 Edit Media")
 async def init_edit_media(message: types.Message, state: FSMContext):
     await state.set_state(ProfileSetup.waiting_for_media)
-    await state.update_data(temp_media=[])
-    await message.answer(
-        "Send up to 10 Photos or Videos.\nWhen finished, click '✅ Done (Save Media)'.", 
-        reply_markup=edit_media_fsm_kb()
-    )
+    await message.answer("Send a single media file, OR an album of up to 10 photos/videos in one message.", reply_markup=edit_fsm_kb())
 
 # --- FSM ACTIONS (Cancel / Clear) ---
 
@@ -85,8 +79,7 @@ async def fsm_clear(message: types.Message, state: FSMContext):
 @router.message(ProfileSetup.waiting_for_priv_contact)
 async def capture_text(message: types.Message, state: FSMContext):
     if message.text in ["❌ Cancel", "🗑️ Clear Field"]: return
-    if message.content_type != 'text':
-        return await message.answer("❌ Please send text only. (Or press '❌ Cancel')")
+    if message.content_type != 'text': return await message.answer("❌ Please send text only.")
     
     curr_state = await state.get_state()
     field = "text" if curr_state == ProfileSetup.waiting_for_bio else \
@@ -95,38 +88,58 @@ async def capture_text(message: types.Message, state: FSMContext):
     active_prof = await Database.get_active_profile(message.from_user.id)
     await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {field: message.text}})
     await message.answer("✅ Saved!")
-    await show_main_menu(message, state)
+    
+    # Auto-refresh main menu
+    updated = await Database.get_active_profile(message.from_user.id)
+    await send_profile(message.chat.id, updated, main_menu_kb(updated['public_uuid']), is_main_menu=True)
+    await state.clear()
 
 @router.message(ProfileSetup.waiting_for_media)
 async def capture_media(message: types.Message, state: FSMContext):
     if message.text in ["❌ Cancel", "🗑️ Clear Field"]: return
-    
-    if message.text == "✅ Done (Save Media)":
-        data = await state.get_data()
-        final_media = data.get("temp_media", [])
-        active_prof = await Database.get_active_profile(message.from_user.id)
-        await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": final_media}})
-        await message.answer(f"✅ Media saved ({len(final_media)} items).")
-        return await show_main_menu(message, state)
-        
-    valid_types = ['photo', 'video']
+    valid_types = ['photo', 'video', 'voice', 'animation', 'audio', 'document']
     if message.content_type not in valid_types:
-        return await message.answer("❌ Please send only Photos or Videos, or click '✅ Done'.")
+        return await message.answer("❌ Invalid media type.")
         
-    data = await state.get_data()
-    temp_media = data.get("temp_media", [])
+    active_prof = await Database.get_active_profile(message.from_user.id)
+    media_doc = {"type": message.content_type}
+    if message.photo: media_doc['file_id'] = message.photo[-1].file_id
+    elif message.video: media_doc['file_id'] = message.video.file_id
+    elif message.voice: media_doc['file_id'] = message.voice.file_id
+    elif message.animation: media_doc['file_id'] = message.animation.file_id
+    elif message.audio: media_doc['file_id'] = message.audio.file_id
+    elif message.document: media_doc['file_id'] = message.document.file_id
     
-    if len(temp_media) < 10:
-        if message.photo: temp_media.append({"type": "photo", "file_id": message.photo[-1].file_id})
-        elif message.video: temp_media.append({"type": "video", "file_id": message.video.file_id})
-        await state.update_data(temp_media=temp_media)
+    # Media Group Logic (Albums arrive rapidly in succession)
+    if message.media_group_id:
+        data = await state.get_data()
+        mg_id = data.get("current_mg_id")
+        if mg_id != message.media_group_id:
+            # First item of a new album
+            await state.update_data(current_mg_id=message.media_group_id)
+            await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": [media_doc]}})
+            await message.answer("✅ Processing album...", reply_markup=main_menu_kb(active_prof['public_uuid']))
+        else:
+            # Append subsequent items
+            await Database.db.profiles.update_one(
+                {"public_uuid": active_prof['public_uuid']}, 
+                {"$push": {"media": {"$each": [media_doc], "$slice": 10}}}
+            )
+    else:
+        # Single file
+        await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": [media_doc]}})
+        await message.answer("✅ Media saved!")
+        updated = await Database.get_active_profile(message.from_user.id)
+        await send_profile(message.chat.id, updated, main_menu_kb(updated['public_uuid']), is_main_menu=True)
+        await state.clear()
 
 # --- PROFILES MANAGEMENT ---
 
 @router.message(F.text == "👥 Profiles")
 async def profiles_menu(message: types.Message):
     cursor = Database.db.profiles.find({"user_id": message.from_user.id})
-    profiles = await cursor.to_list(length=10)
+    profiles = await cursor.to_list(length=100)
+    count = len(profiles)
     
     inline_kb = []
     for p in profiles:
@@ -134,15 +147,39 @@ async def profiles_menu(message: types.Message):
         if p.get("is_hidden"): status += " 👻 Hidden"
         inline_kb.append([InlineKeyboardButton(text=f"{p['public_uuid']} [{status}]", callback_data=f"manage_prof_{p['public_uuid']}")])
         
-    await message.answer("👥 <b>Manage Profiles</b>\nSelect an identity below:", reply_markup=profiles_menu_kb())
-    await message.answer("Your profiles:", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_kb))
+    await message.answer(f"👥 <b>Manage Profiles ({count}/100)</b>\nSelect an identity below:", reply_markup=profiles_menu_kb())
+    if inline_kb:
+        await message.answer("Your profiles:", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_kb))
 
 @router.message(F.text == "➕ Create Profile")
 @router.message(Command("create_profile"))
 async def create_profile_cmd(message: types.Message):
-    await Database.create_profile(message.from_user.id)
+    prof = await Database.create_profile(message.from_user.id)
+    if not prof:
+        return await message.answer("❌ You have reached the maximum limit of 100 profiles.")
     await message.answer("✅ New profile created!")
     await profiles_menu(message)
+
+@router.message(F.text == "🗑️ Delete All But Active")
+async def del_all_but_active(message: types.Message):
+    await Database.delete_all_but_active(message.from_user.id)
+    await message.answer("✅ All inactive profiles deleted.")
+    await profiles_menu(message)
+
+@router.message(F.text == "💣 Delete All Profiles")
+async def request_del_all(message: types.Message, state: FSMContext):
+    await state.set_state(ProfileSetup.waiting_for_delete_all)
+    await message.answer("⚠️ <b>WARNING:</b> This will permanently delete ALL your profiles.\nAre you absolutely sure?", reply_markup=confirm_delete_all_kb())
+
+@router.message(ProfileSetup.waiting_for_delete_all)
+async def confirm_del_all(message: types.Message, state: FSMContext):
+    if message.text == "⚠️ YES, DELETE ALL PROFILES":
+        await Database.delete_all_profiles(message.from_user.id)
+        await message.answer("✅ All profiles completely wiped.\nA new blank profile will be created.")
+        await state.clear()
+        await show_main_menu(message, state)
+    else:
+        await fsm_cancel(message, state)
 
 @router.callback_query(F.data.startswith("manage_prof_"))
 async def manage_prof_cb(callback: types.CallbackQuery, state: FSMContext):
@@ -167,17 +204,13 @@ async def manage_actions(message: types.Message, state: FSMContext):
     if not p: return await show_main_menu(message, state)
 
     if message.text == "🌟 Set Active":
-        if p.get("is_active"):
-            return await message.answer("✅ This profile is already active!")
         await Database.set_active_profile(user_id, prof_uuid)
         await message.answer("🌟 Profile Activated!")
         await show_main_menu(message, state)
-        
     elif message.text == "👁️ Toggle Vis":
         await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"is_hidden": not p.get('is_hidden', False)}})
         await message.answer("👁️ Visibility toggled.")
         await profiles_menu(message)
-        
     elif message.text == "🔄 Regen ID":
         new_uuid = uuid.uuid4().hex[:8]
         await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"public_uuid": new_uuid}})
@@ -185,12 +218,11 @@ async def manage_actions(message: types.Message, state: FSMContext):
         await message.answer(f"🔄 ID Regenerated: {new_uuid}")
         p = await Database.get_profile_by_uuid(new_uuid)
         await send_profile(message.chat.id, p, manage_action_kb())
-        
     elif message.text == "🗑️ Delete":
         success = await Database.delete_profile(user_id, prof_uuid)
         if success:
             await message.answer("🗑️ Profile Deleted.")
-            await show_main_menu(message, state)
+            await profiles_menu(message)
         else:
             await message.answer("❌ Cannot delete your only profile.")
 
@@ -259,10 +291,10 @@ async def execute_contact_request(user_id: int, state: FSMContext, message=None)
 async def unhandled_message(message: types.Message, state: FSMContext):
     curr_state = await state.get_state()
     if curr_state:
-        await message.answer("❌ Invalid format. Please send the correct content, or press '❌ Cancel'.")
+        await message.answer("❌ Invalid input for this step. Please correct it or press '❌ Cancel'.")
     else:
         active = await Database.get_active_profile(message.from_user.id)
         if active:
-            await message.answer("🤷 I didn't understand that. Please use the menu buttons below.", reply_markup=main_menu_kb(active['public_uuid']))
+            await message.answer("🤷 Unrecognized command. Please use the menu buttons below.", reply_markup=main_menu_kb(active['public_uuid']))
         else:
             await message.answer("🤷 Send /start to begin.")

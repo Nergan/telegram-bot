@@ -38,7 +38,10 @@ class Database:
         return await cls.create_profile(user_id)
 
     @classmethod
-    async def create_profile(cls, user_id: int) -> dict:
+    async def create_profile(cls, user_id: int) -> dict | None:
+        if await cls.db.profiles.count_documents({"user_id": user_id}) >= 100:
+            return None # Enforce 100 limit
+
         public_uuid = uuid.uuid4().hex[:8]
         profile = {
             "user_id": user_id,
@@ -46,7 +49,7 @@ class Database:
             "tags": [],
             "filters": {"require_tags": [], "exclude_tags": [], "any_tags": []},
             "text": None,
-            "media": [], # List of {"type": str, "file_id": str} up to 10
+            "media": [], 
             "public_contact": None,
             "private_contact": None,
             "is_active": False,
@@ -77,10 +80,17 @@ class Database:
     async def delete_profile(cls, user_id: int, public_uuid: str) -> bool:
         if await cls.db.profiles.count_documents({"user_id": user_id}) <= 1:
             return False 
-            
         await cls.db.profiles.delete_one({"user_id": user_id, "public_uuid": public_uuid})
         active = await cls.db.profiles.find_one({"user_id": user_id, "is_active": True})
         if not active:
             any_prof = await cls.db.profiles.find_one({"user_id": user_id})
             if any_prof: await cls.set_active_profile(user_id, any_prof['public_uuid'])
         return True
+
+    @classmethod
+    async def delete_all_but_active(cls, user_id: int):
+        await cls.db.profiles.delete_many({"user_id": user_id, "is_active": False})
+
+    @classmethod
+    async def delete_all_profiles(cls, user_id: int):
+        await cls.db.profiles.delete_many({"user_id": user_id})
