@@ -1,19 +1,20 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
 from core.config import WEBHOOK_URL
 
-# --- REPLY KEYBOARDS (Нижние кнопки меню) ---
+# --- REPLY KEYBOARDS ---
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
-    """Главное меню (удалена кнопка просмотра приватных контактов)"""
+    """Главное меню (переименовано Edit Info, удалена кнопка Edit Media)"""
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🔍 Browse")],
-        [KeyboardButton(text="📝 Edit Info"), KeyboardButton(text="📸 Edit Media")],
+        [KeyboardButton(text="📝 Edit Active Profile")],
         [KeyboardButton(text="👥 Profiles")]
     ], resize_keyboard=True)
 
 def edit_info_menu_kb() -> ReplyKeyboardMarkup:
+    """Меню изменения активной анкеты (сюда перенесена кнопка Edit Media)"""
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="✏️ Bio")], 
+        [KeyboardButton(text="✏️ Bio"), KeyboardButton(text="📸 Edit Media")], 
         [KeyboardButton(text="📞 Manage Contacts")], 
         [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
@@ -23,29 +24,35 @@ def edit_fsm_kb() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="❌ Cancel"), KeyboardButton(text="🗑️ Clear Field")]
     ], resize_keyboard=True)
 
+def cancel_fsm_kb() -> ReplyKeyboardMarkup:
+    """Клавиатура отмены без кнопки очистки поля (используется при создании контакта)"""
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="❌ Cancel")]
+    ], resize_keyboard=True)
+
 def browse_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="⏩ Next Profile")],
         [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
 
-def manage_action_kb() -> ReplyKeyboardMarkup:
-    """Убрана кнопка переключения видимости (скрытия)"""
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🌟 Set Active")],
-        [KeyboardButton(text="🔄 Regen ID"), KeyboardButton(text="🗑️ Delete")],
-        [KeyboardButton(text="🏠 View Active Profile")]
-    ], resize_keyboard=True)
+def manage_action_kb(is_active: bool = False) -> ReplyKeyboardMarkup:
+    """Динамически скрывает кнопку 'Set Active', если анкета уже активна"""
+    keyboard = []
+    if not is_active:
+        keyboard.append([KeyboardButton(text="🌟 Set Active")])
+    keyboard.append([KeyboardButton(text="🔄 Regen ID"), KeyboardButton(text="🗑️ Delete")])
+    keyboard.append([KeyboardButton(text="🏠 View Active Profile")])
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 def profiles_menu_kb() -> ReplyKeyboardMarkup:
-    """Убрана кнопка удаления всех профилей"""
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="➕ Create Profile")],
         [KeyboardButton(text="🗑️ Delete All But Active")],
         [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
 
-# --- INLINE KEYBOARDS (Кнопки под сообщениями) ---
+# --- INLINE KEYBOARDS ---
 
 def profile_inline_kb(profile_uuid: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[

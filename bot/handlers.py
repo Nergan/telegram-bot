@@ -25,7 +25,7 @@ async def show_main_menu(message: types.Message, state: FSMContext):
 
 # --- FSM CAPTURE ---
 
-@router.message(F.text == "📝 Edit Info")
+@router.message(F.text == "📝 Edit Active Profile") # Изменен триггер
 async def edit_info_menu(message: types.Message):
     await message.answer("What would you like to edit?", reply_markup=edit_info_menu_kb())
 
@@ -57,18 +57,20 @@ async def manage_contacts_menu(message: types.Message):
 @router.callback_query(F.data == "add_contact_fsm")
 async def add_contact_fsm_start(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(ProfileSetup.waiting_for_contact_val)
-    await callback.message.answer("Please send the contact detail (e.g. phone, email, link):", reply_markup=edit_fsm_kb())
+    # Используем чистую клавиатуру отмены без кнопки очистки поля
+    await callback.message.answer("Please send the contact detail (e.g. phone, email, link):", reply_markup=cancel_fsm_kb())
     await callback.answer()
 
 @router.message(ProfileSetup.waiting_for_contact_val)
 async def capture_new_contact(message: types.Message, state: FSMContext):
-    if message.text in ["❌ Cancel", "🗑️ Clear Field"]: return
+    if message.text == "❌ Cancel":
+        await fsm_cancel(message, state)
+        return
     if message.content_type != 'text': return await message.answer("❌ Please send text only.")
     
     user_id = message.from_user.id
     active_prof = await Database.get_active_profile(user_id)
     
-    # Ограничение 1: Максимум 8 контактов на профиль
     contacts = active_prof.get("contacts", [])
     if len(contacts) >= 8:
         await state.clear()
@@ -78,15 +80,12 @@ async def capture_new_contact(message: types.Message, state: FSMContext):
         
     contact_val = message.text.strip()
     
-    # Ограничение 2: Максимум 100 символов
     if len(contact_val) > 100:
         return await message.answer("❌ Contact details must be 100 characters or less. Please try again:")
         
-    # Ограничение 3: Запрет переноса строк
     if "\n" in contact_val or "\r" in contact_val:
         return await message.answer("❌ Contact details must be a single line (no line breaks). Please try again:")
         
-    # Ограничение 4: Базовая валидация длины
     if len(contact_val) < 3:
         return await message.answer("❌ Contact details are too short. Please try again:")
     
@@ -109,7 +108,6 @@ async def capture_new_contact(message: types.Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("togglecon_"))
 async def toggle_contact_visibility(callback: types.CallbackQuery):
-    # Исправлено: безопасное извлечение ID с помощью replace предотвращает ошибки со сплиттером
     cid = callback.data.replace("togglecon_", "", 1)
     active_prof = await Database.get_active_profile(callback.from_user.id)
     
@@ -138,7 +136,6 @@ async def toggle_contact_visibility(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("delcon_"))
 async def delete_contact(callback: types.CallbackQuery):
-    # Исправлено: безопасное извлечение ID
     cid = callback.data.replace("delcon_", "", 1)
     if cid == "tg_username":
         return await callback.answer("❌ You cannot delete your Telegram username contact.", show_alert=True)
@@ -191,7 +188,12 @@ async def fsm_clear(message: types.Message, state: FSMContext):
 
 @router.message(ProfileSetup.waiting_for_bio)
 async def capture_text(message: types.Message, state: FSMContext):
-    if message.text in ["❌ Cancel", "🗑️ Clear Field"]: return
+    if message.text == "❌ Cancel":
+        await fsm_cancel(message, state)
+        return
+    if message.text == "🗑️ Clear Field":
+        await fsm_clear(message, state)
+        return
     if message.content_type != 'text': return await message.answer("❌ Please send text only.")
     
     active_prof = await Database.get_active_profile(message.from_user.id)
@@ -204,7 +206,12 @@ async def capture_text(message: types.Message, state: FSMContext):
 
 @router.message(ProfileSetup.waiting_for_media)
 async def capture_media(message: types.Message, state: FSMContext):
-    if message.text in ["❌ Cancel", "🗑️ Clear Field"]: return
+    if message.text == "❌ Cancel":
+        await fsm_cancel(message, state)
+        return
+    if message.text == "🗑️ Clear Field":
+        await fsm_clear(message, state)
+        return
     valid_types = ['photo', 'video', 'voice', 'animation', 'audio', 'document']
     if message.content_type not in valid_types:
         return await message.answer("❌ Invalid media type.")
@@ -304,7 +311,13 @@ async def manage_prof_cb(callback: types.CallbackQuery, state: FSMContext):
     
     await state.update_data(managing_uuid=prof_uuid)
     await callback.message.delete()
-    await send_profile(callback.from_user.id, profile, manage_action_kb())
+    
+    # 1. Изменяем Reply-меню снизу, скрывая кнопку 'Set Active', если профиль уже активен
+    is_active = profile.get('is_active', False)
+    await callback.message.answer("⚙️ Managing Profile...", reply_markup=manage_action_kb(is_active))
+    
+    # 2. Высылаем сам профиль с inline кнопками тегов/фильтров, гарантируя их видимость
+    await send_profile(callback.from_user.id, profile, profile_inline_kb(prof_uuid))
     await callback.answer()
 
 @router.message(F.text.in_({"🌟 Set Active", "🔄 Regen ID", "🗑️ Delete"}))
@@ -326,7 +339,9 @@ async def manage_actions(message: types.Message, state: FSMContext):
         await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"public_uuid": new_uuid}})
         await state.update_data(managing_uuid=new_uuid)
         p = await Database.get_profile_by_uuid(new_uuid)
-        await send_profile(message.chat.id, p, manage_action_kb())
+        # Обновляем нижнюю Reply-клавиатуру и высылаем карточку с inline-кнопками тегов
+        await message.answer("🔄 ID Regenerated!", reply_markup=manage_action_kb(p.get('is_active', False)))
+        await send_profile(message.chat.id, p, profile_inline_kb(new_uuid))
     elif message.text == "🗑️ Delete":
         success = await Database.delete_profile(user_id, prof_uuid)
         if success:
@@ -382,7 +397,7 @@ async def browse_next(message: types.Message, state: FSMContext):
 async def no_private_alert_cb(callback: types.CallbackQuery):
     await callback.answer(
         "⚠️ You have no private contacts to share!\n"
-        "Please add a private contact under '📝 Edit Info' -> '📞 Manage Contacts' first.",
+        "Please add a private contact under '📝 Edit Active Profile' -> '📞 Manage Contacts' first.",
         show_alert=True
     )
 
@@ -621,7 +636,7 @@ async def contact_decisions(callback: types.CallbackQuery, state: FSMContext):
         
         private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
         if not private_contacts:
-            return await callback.answer("⚠️ You must set at least one private contact under '📝 Edit Info' -> '📞 Manage Contacts' first.", show_alert=True)
+            return await callback.answer("⚠️ You must set at least one private contact under '📝 Edit Active Profile' -> '📞 Manage Contacts' first.", show_alert=True)
             
         await state.update_data(
             accepting_req_id=req_id,
@@ -668,7 +683,11 @@ async def contact_decisions(callback: types.CallbackQuery, state: FSMContext):
 async def unhandled_message(message: types.Message, state: FSMContext):
     curr_state = await state.get_state()
     if curr_state:
-        await message.answer("❌ Invalid input for this step. Please correct it or press '❌ Cancel'.")
+        # Исправлено: Сброс состояния для отмены добавления контакта теперь работает
+        if curr_state == ProfileSetup.waiting_for_contact_val and message.text == "❌ Cancel":
+            await fsm_cancel(message, state)
+        else:
+            await message.answer("❌ Invalid input for this step. Please correct it or press '❌ Cancel'.")
     else:
         active = await Database.get_active_profile(message.from_user.id)
         if active:

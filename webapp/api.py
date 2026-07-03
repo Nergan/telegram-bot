@@ -8,7 +8,7 @@ from core.config import AVAILABLE_TAGS
 from core.security import validate_webapp_data
 from core.database import Database
 from bot.bot_setup import bot
-from bot.keyboards import profile_inline_kb  # Оставляем только нужный импорт
+from bot.keyboards import profile_inline_kb  
 from bot.helpers import send_profile
 
 router = APIRouter()
@@ -43,14 +43,15 @@ async def update_tags(payload: WebAppPayload):
     user_id = user_data['id']
     if payload.mode == "edit":
         await Database.db.profiles.update_one({"user_id": user_id, "public_uuid": payload.profile_id}, {"$set": {"tags": payload.tags}})
+        active = await Database.get_active_profile(user_id)
+        if active and active['public_uuid'] == payload.profile_id:
+            await send_profile(user_id, active, profile_inline_kb(active['public_uuid']))
     else:
+        # Изменение фильтров: отправляем короткое подтверждение без лишнего дублирования анкеты
         f_data = {"require_tags": payload.require_tags, "exclude_tags": payload.exclude_tags, "any_tags": payload.any_tags}
         await Database.db.profiles.update_one({"user_id": user_id, "public_uuid": payload.profile_id}, {"$set": {"filters": f_data}})
-        
-    active = await Database.get_active_profile(user_id)
-    if active and active['public_uuid'] == payload.profile_id:
-        # Убрано служебное текстовое сообщение "Settings updated!"
-        # Сразу отправляем обновленную анкету с новыми inline-кнопками тегов/фильтров
-        await send_profile(user_id, active, profile_inline_kb(active['public_uuid']))
+        active = await Database.get_active_profile(user_id)
+        if active and active['public_uuid'] == payload.profile_id:
+            await bot.send_message(user_id, "✅ Filters successfully updated!")
         
     return {"status": "ok"}
