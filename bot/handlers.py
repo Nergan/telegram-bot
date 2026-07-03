@@ -3,7 +3,7 @@ import html
 import asyncio
 import logging
 from aiogram import Router, F, types
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, StateFilter  # Импортирован StateFilter
 from aiogram.fsm.context import FSMContext
 from bot.bot_setup import bot
 from bot.states import ProfileSetup, ContactRequest
@@ -23,9 +23,24 @@ async def show_main_menu(message: types.Message, state: FSMContext):
     await message.answer("🏠 View Active Profile 🏠", reply_markup=main_menu_kb())
     await send_profile(message.chat.id, active_profile, profile_inline_kb(active_profile['public_uuid']))
 
+@router.message(F.text == "🔒 View Private Contacts")
+async def view_private_contacts(message: types.Message):
+    active_prof = await Database.get_active_profile(message.from_user.id)
+    await Database.sync_telegram_username(active_prof, message.from_user.username)
+    active_prof = await Database.get_active_profile(message.from_user.id)
+    
+    private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
+    if private_contacts:
+        text = "🔒 <b>Your Private Contacts:</b>\n\n"
+        for c in private_contacts:
+            text += f"• <code>{html.escape(c['value'])}</code>\n"
+        await message.answer(text)
+    else:
+        await message.answer("🔒 You have not set any Private Contacts yet.")
+
 # --- FSM CAPTURE ---
 
-@router.message(F.text == "📝 Edit Active Profile") # Изменен триггер
+@router.message(F.text == "📝 Edit Active Profile")
 async def edit_info_menu(message: types.Message):
     await message.answer("What would you like to edit?", reply_markup=edit_info_menu_kb())
 
@@ -57,7 +72,6 @@ async def manage_contacts_menu(message: types.Message):
 @router.callback_query(F.data == "add_contact_fsm")
 async def add_contact_fsm_start(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(ProfileSetup.waiting_for_contact_val)
-    # Используем чистую клавиатуру отмены без кнопки очистки поля
     await callback.message.answer("Please send the contact detail (e.g. phone, email, link):", reply_markup=cancel_fsm_kb())
     await callback.answer()
 
@@ -74,7 +88,7 @@ async def capture_new_contact(message: types.Message, state: FSMContext):
     contacts = active_prof.get("contacts", [])
     if len(contacts) >= 8:
         await state.clear()
-        await message.answer("❌ You can have a maximum of 8 contacts per profile.", reply_markup=main_menu_kb())
+        await message.answer("❌ You can have a maximum of 8 contacts per profile.", reply_markup=edit_info_menu_kb())
         await manage_contacts_menu(message)
         return
         
@@ -102,7 +116,8 @@ async def capture_new_contact(message: types.Message, state: FSMContext):
         {"$push": {"contacts": new_contact}}
     )
     
-    await message.answer("✅ Contact added as Private! You can toggle its visibility in the manager.", reply_markup=main_menu_kb())
+    # Возвращаем пользователя в меню редактирования активного профиля
+    await message.answer("✅ Contact added as Private! You can toggle its visibility in the manager.", reply_markup=edit_info_menu_kb())
     await state.clear()
     await manage_contacts_menu(message)
 
@@ -166,12 +181,15 @@ async def init_edit_media(message: types.Message, state: FSMContext):
     await state.set_state(ProfileSetup.waiting_for_media)
     await message.answer("Send a single media file, OR an album of up to 10 photos/videos in one message.", reply_markup=edit_fsm_kb())
 
-@router.message(F.text == "❌ Cancel", flags={"state": "*"})
+@router.message(StateFilter("*"), F.text == "❌ Cancel")
 async def fsm_cancel(message: types.Message, state: FSMContext):
-    await show_main_menu(message, state)
+    """Глобальный сброс состояния: возвращает в меню редактирования активного профиля"""
+    await state.clear()
+    await edit_info_menu(message)
 
-@router.message(F.text == "🗑️ Clear Field")
+@router.message(StateFilter("*"), F.text == "🗑️ Clear Field")
 async def fsm_clear(message: types.Message, state: FSMContext):
+    """Глобальная очистка поля: возвращает в меню редактирования активного профиля"""
     curr_state = await state.get_state()
     field_map = {
         ProfileSetup.waiting_for_bio: "text",
@@ -181,10 +199,11 @@ async def fsm_clear(message: types.Message, state: FSMContext):
     field = field_map.get(curr_state)
     if field:
         active_prof = await Database.get_active_profile(message.from_user.id)
-        val = [] if field in ["media", "contacts"] else None
+        val = [] if field == "media" else None
         await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {field: val}})
         logger.info(f"User {message.from_user.id} cleared {field}.")
-    await show_main_menu(message, state)
+    await state.clear()
+    await edit_info_menu(message)
 
 @router.message(ProfileSetup.waiting_for_bio)
 async def capture_text(message: types.Message, state: FSMContext):
@@ -199,7 +218,9 @@ async def capture_text(message: types.Message, state: FSMContext):
     active_prof = await Database.get_active_profile(message.from_user.id)
     await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"text": message.text}})
     logger.info(f"User {message.from_user.id} updated bio.")
-    await message.answer("✅ Saved!", reply_markup=main_menu_kb())
+    
+    # Возвращаем пользователя в меню редактирования активного профиля
+    await message.answer("✅ Saved!", reply_markup=edit_info_menu_kb())
     updated = await Database.get_active_profile(message.from_user.id)
     await send_profile(message.chat.id, updated, profile_inline_kb(updated['public_uuid']))
     await state.clear()
@@ -231,7 +252,9 @@ async def capture_media(message: types.Message, state: FSMContext):
         if mg_id != message.media_group_id:
             await state.update_data(current_mg_id=message.media_group_id)
             await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": [media_doc]}})
-            await message.answer("✅ Processing album...", reply_markup=main_menu_kb())
+            
+            # Возвращаем пользователя в меню редактирования активного профиля
+            await message.answer("✅ Processing album...", reply_markup=edit_info_menu_kb())
             
             async def show_updated_profile_after_delay():
                 await asyncio.sleep(1.5)
@@ -249,7 +272,9 @@ async def capture_media(message: types.Message, state: FSMContext):
             )
     else:
         await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": [media_doc]}})
-        await message.answer("✅ Media saved!", reply_markup=main_menu_kb())
+        
+        # Возвращаем пользователя в меню редактирования активного профиля
+        await message.answer("✅ Media saved!", reply_markup=edit_info_menu_kb())
         updated = await Database.get_active_profile(message.from_user.id)
         await send_profile(message.chat.id, updated, profile_inline_kb(updated['public_uuid']))
         await state.clear()
@@ -257,6 +282,7 @@ async def capture_media(message: types.Message, state: FSMContext):
 # --- PROFILES MANAGEMENT ---
 
 @router.message(F.text == "👥 Profiles")
+@router.message(F.text == "👥 View profiles again") # Маппинг новой кнопки на возврат в пулу
 async def profiles_menu(message: types.Message, state: FSMContext = None):
     if state:
         await state.clear()
@@ -312,11 +338,10 @@ async def manage_prof_cb(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(managing_uuid=prof_uuid)
     await callback.message.delete()
     
-    # 1. Изменяем Reply-меню снизу, скрывая кнопку 'Set Active', если профиль уже активен
     is_active = profile.get('is_active', False)
     await callback.message.answer("⚙️ Managing Profile...", reply_markup=manage_action_kb(is_active))
     
-    # 2. Высылаем сам профиль с inline кнопками тегов/фильтров, гарантируя их видимость
+    # Всегда присылаем inline-кнопки тегов/фильтров под анкетой при просмотре собственного профиля владельцем
     await send_profile(callback.from_user.id, profile, profile_inline_kb(prof_uuid))
     await callback.answer()
 
@@ -339,7 +364,7 @@ async def manage_actions(message: types.Message, state: FSMContext):
         await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"public_uuid": new_uuid}})
         await state.update_data(managing_uuid=new_uuid)
         p = await Database.get_profile_by_uuid(new_uuid)
-        # Обновляем нижнюю Reply-клавиатуру и высылаем карточку с inline-кнопками тегов
+        
         await message.answer("🔄 ID Regenerated!", reply_markup=manage_action_kb(p.get('is_active', False)))
         await send_profile(message.chat.id, p, profile_inline_kb(new_uuid))
     elif message.text == "🗑️ Delete":
@@ -683,11 +708,8 @@ async def contact_decisions(callback: types.CallbackQuery, state: FSMContext):
 async def unhandled_message(message: types.Message, state: FSMContext):
     curr_state = await state.get_state()
     if curr_state:
-        # Исправлено: Сброс состояния для отмены добавления контакта теперь работает
-        if curr_state == ProfileSetup.waiting_for_contact_val and message.text == "❌ Cancel":
-            await fsm_cancel(message, state)
-        else:
-            await message.answer("❌ Invalid input for this step. Please correct it or press '❌ Cancel'.")
+        # Убран избыточный ручной сброс: StateFilter("*") теперь глобально перехватывает отмену
+        await message.answer("❌ Invalid input for this step. Please correct it or press '❌ Cancel'.")
     else:
         active = await Database.get_active_profile(message.from_user.id)
         if active:
