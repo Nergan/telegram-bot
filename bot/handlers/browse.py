@@ -95,14 +95,16 @@ async def init_contact_inline(callback: types.CallbackQuery, state: FSMContext):
     has_msg = action_type.endswith("msg")
     db_action = "send" if is_send else "req"
     
-    if db_action == "req":
-        existing_req = await Database.db.contact_requests.find_one({
-            "initiator_id": callback.from_user.id,
-            "target_id": target_prof['user_id'],
-            "status": "pending"
-        })
-        if existing_req:
-            return await callback.answer("⏳ You already have a pending request with this user.", show_alert=True)
+    # 1. Pre-Check for Spam duplicate requests
+    existing_req = await Database.db.contact_requests.find_one({
+        "initiator_id": callback.from_user.id,
+        "target_id": target_prof['user_id'],
+        "status": "pending",
+        "action": db_action
+    })
+    if existing_req:
+        req_type_str = "one-way share" if db_action == "send" else "exchange request"
+        return await callback.answer(f"⏳ You already have a pending {req_type_str} with this user.", show_alert=True)
     
     await state.update_data(
         target_uuid=target_uuid, 
@@ -234,11 +236,15 @@ async def confirm_share_contacts_cb(callback: types.CallbackQuery, state: FSMCon
     else:
         target_uuid = data.get("target_uuid")
         await state.update_data(shared_contacts=shared_contacts)
-        await execute_contact_request(callback.from_user.id, state, message=None)
+        success = await execute_contact_request(callback.from_user.id, state, message=None)
         
-        msg = f"✅ Message and contacts sent to <code>{target_uuid}</code>!" if action == "send" else f"✅ Mutual request sent to <code>{target_uuid}</code>!"
         await callback.message.delete()
-        await callback.message.answer(msg, reply_markup=browse_kb())
+        if success:
+            msg = f"✅ Message and contacts sent to <code>{target_uuid}</code>!" if action == "send" else f"✅ Mutual request sent to <code>{target_uuid}</code>!"
+            await callback.message.answer(msg, reply_markup=browse_kb())
+        else:
+            req_type_str = "one-way share" if action == "send" else "exchange request"
+            await callback.message.answer(f"⏳ You already have a pending {req_type_str} with this user.", reply_markup=browse_kb())
 
 @router.callback_query(F.data == "cancel_share_contacts", ContactRequest.selecting_contacts)
 async def cancel_share_contacts_cb(callback: types.CallbackQuery, state: FSMContext):
@@ -257,41 +263,53 @@ async def capture_contact_msg(message: types.Message, state: FSMContext):
     await state.update_data(message_text=message.text)
     await show_contact_selection(message, state)
 
-async def execute_contact_request(user_id: int, state: FSMContext, message=None):
+async def execute_contact_request(user_id: int, state: FSMContext, message=None) -> bool:
     data = await state.get_data()
     target_prof = await Database.get_profile_by_uuid(data['target_uuid'])
-    if not target_prof: return
+    if not target_prof: return False
     
     action = data['action']
+    
+    # 2. Strict double-check before saving to database (Protects against parallel API race conditions)
+    existing_req = await Database.db.contact_requests.find_one({
+        "initiator_id": user_id,
+        "target_id": target_prof['user_id'],
+        "status": "pending",
+        "action": action
+    })
+    if existing_req:
+        await state.clear()
+        return False
+
     msg_text = message.text if message else data.get("message_text")
     shared_contacts = data.get("shared_contacts", [])
     initiator = await Database.get_active_profile(user_id)
     
+    req_id = uuid.uuid4().hex
+    req_doc = {
+        "req_id": req_id, 
+        "initiator_id": user_id, 
+        "target_id": target_prof['user_id'], 
+        "action": action, 
+        "status": "pending", 
+        "message": msg_text,
+        "shared_contacts": shared_contacts
+    }
+    await Database.db.contact_requests.insert_one(req_doc)
+    
     if action == "send":
+        logger.info(f"One-way share {req_id} initiated by {user_id} to {target_prof['user_id']}")
         prefix = f"🔔 <b>A USER SHARED THEIR PROFILE WITH YOU!</b>\n"
         if msg_text: prefix += f"💬 <b>Message:</b> {html.escape(msg_text)}\n\n"
         if shared_contacts:
-            contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
-            prefix = f"🤝 <b>A USER SHARED CONTACTS!</b>\nShared details:\n{contacts_text}\n\n" + prefix
-        else:
-            prefix += "\n"
-        
+            prefix += "🤝 <b>They also shared private contacts with you!</b>\n"
+            
+        prefix += "Open '📥 Requests' from your active profile to view details.\n\n"
+        # Only sending the concise notification for One-Way to minimize chat spam
         await send_profile(target_prof['user_id'], initiator, kb=None, custom_prefix=prefix)
     
     else:
-        req_id = uuid.uuid4().hex
-        req_doc = {
-            "req_id": req_id, 
-            "initiator_id": user_id, 
-            "target_id": target_prof['user_id'], 
-            "action": action, 
-            "status": "pending", 
-            "message": msg_text,
-            "shared_contacts": shared_contacts
-        }
-        await Database.db.contact_requests.insert_one(req_doc)
         logger.info(f"Mutual Contact Request {req_id} initiated by {user_id} to {target_prof['user_id']}")
-        
         prefix = f"🔔 <b>NEW CONTACT EXCHANGE REQUEST!</b>\n"
         if msg_text: prefix += f"💬 <b>Message:</b> {html.escape(msg_text)}\n\n"
         prefix += "They want to exchange private contacts simultaneously. Accept to select yours and view theirs.\n\n"
@@ -299,6 +317,7 @@ async def execute_contact_request(user_id: int, state: FSMContext, message=None)
         await send_profile(target_prof['user_id'], initiator, contact_decision_kb(req_id), custom_prefix=prefix)
         
     await state.clear()
+    return True
 
 @router.callback_query(F.data.startswith("accept_") | F.data.startswith("decline_"))
 async def contact_decisions(callback: types.CallbackQuery, state: FSMContext):

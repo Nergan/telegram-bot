@@ -30,7 +30,7 @@ class RequestsPayload(BaseModel):
 class HandleRequestPayload(BaseModel):
     initData: str
     req_id: str
-    action: str  # "accept", "decline", "cancel"
+    action: str  # "accept", "decline", "viewed"
     selected_contact_ids: Optional[List[str]] = None
 
 @router.get("/webapp", response_class=HTMLResponse)
@@ -104,8 +104,10 @@ async def get_requests_endpoint(payload: RequestsPayload):
                 
             formatted_sent.append({
                 "req_id": r.get("req_id", ""),
+                "action": r.get("action", "req"),
                 "status": "pending",
                 "message": r.get("message", ""),
+                "shared_contacts": r.get("shared_contacts", []),
                 "other_profile": {
                     "public_uuid": other_profile.get("public_uuid", ""),
                     "bio": other_profile.get("text", "") or "",
@@ -125,8 +127,10 @@ async def get_requests_endpoint(payload: RequestsPayload):
                 
             formatted_recv.append({
                 "req_id": r.get("req_id", ""),
+                "action": r.get("action", "req"),
                 "status": "pending",
                 "message": r.get("message", ""),
+                "shared_contacts": r.get("shared_contacts", []),
                 "other_profile": {
                     "public_uuid": other_profile.get("public_uuid", ""),
                     "bio": other_profile.get("text", "") or "",
@@ -156,16 +160,7 @@ async def handle_request_endpoint(payload: HandleRequestPayload):
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
             
-        if payload.action == "cancel":
-            if req['initiator_id'] != user_id:
-                raise HTTPException(status_code=403, detail="Permission denied")
-            if req['status'] != 'pending':
-                raise HTTPException(status_code=400, detail="Cannot cancel this request")
-                
-            await Database.db.contact_requests.delete_one({"req_id": payload.req_id})
-            return {"status": "ok"}
-            
-        elif payload.action == "decline":
+        if payload.action == "decline":
             if req['target_id'] != user_id or req['status'] != 'pending':
                 raise HTTPException(status_code=403, detail="Permission denied or invalid status")
                 
@@ -175,6 +170,13 @@ async def handle_request_endpoint(payload: HandleRequestPayload):
                 await bot.send_message(req['initiator_id'], "❌ A mutual contact exchange request was declined.")
             except Exception:
                 pass
+            return {"status": "ok"}
+            
+        elif payload.action == "viewed":
+            if req['target_id'] != user_id or req['status'] != 'pending':
+                raise HTTPException(status_code=403, detail="Permission denied or invalid status")
+                
+            await Database.db.contact_requests.update_one({"req_id": payload.req_id}, {"$set": {"status": "viewed"}})
             return {"status": "ok"}
             
         elif payload.action == "accept":

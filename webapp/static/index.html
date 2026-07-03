@@ -266,24 +266,42 @@
                 
                 let buttonsHtml = '';
                 if (currentTab === 'received') {
-                    buttonsHtml = `
-                        <button class="btn btn-secondary" onclick="openModal('${r.req_id}')">✅ Accept & Exchange</button>
-                        <button class="btn btn-danger" onclick="handleActionNoModal('decline', '${r.req_id}')">❌ Decline</button>
-                    `;
+                    if (r.action === 'send') {
+                        buttonsHtml = `
+                            <button class="btn btn-primary" onclick="handleActionNoModal('viewed', '${r.req_id}')">👁️ Mark as Viewed</button>
+                        `;
+                    } else {
+                        buttonsHtml = `
+                            <button class="btn btn-secondary" onclick="openModal('${r.req_id}')">✅ Accept & Exchange</button>
+                            <button class="btn btn-danger" onclick="handleActionNoModal('decline', '${r.req_id}')">❌ Decline</button>
+                        `;
+                    }
                 } else {
-                    buttonsHtml = `
-                        <button class="btn btn-danger" onclick="handleActionNoModal('cancel', '${r.req_id}')">❌ Cancel Request</button>
-                    `;
+                    // SENT tab (Cancel Removed for security purposes)
+                    buttonsHtml = `<span style="font-size:12px; color:gray;">Waiting for target to respond...</span>`;
                 }
-                
+
+                let reqTypeLabel = r.action === 'send' ? 'ONE-WAY SHARE' : 'MUTUAL EXCHANGE REQUEST';
+                let reqTypeColor = r.action === 'send' ? '#2196F3' : '#FF9800';
+
+                // Safely show transferred private contacts ONLY for one-way request type.
+                let sharedContactsHtml = '';
+                if (r.action === 'send' && Array.isArray(r.shared_contacts) && r.shared_contacts.length > 0) {
+                    sharedContactsHtml = `<div style="font-size:13px; margin-bottom:10px; background: rgba(33, 150, 243, 0.1); padding: 8px; border-radius: 6px;">
+                        <b>Shared Private Contacts:</b><br>
+                        ${r.shared_contacts.map(c => `• <code>${escapeHtml(c)}</code>`).join('<br>')}
+                    </div>`;
+                }
+
                 card.innerHTML = `
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                         <span style="font-weight:bold; font-size:14px;">ID: ${escapeHtml(otherProf.public_uuid || '')}</span>
-                        <span class="req-status">PENDING</span>
+                        <span class="req-status" style="color:${reqTypeColor};">${reqTypeLabel}</span>
                     </div>
                     <p class="req-bio">${otherProf.bio ? escapeHtml(otherProf.bio) : '<i>No bio set.</i>'}</p>
                     <div style="font-size:12px; color:gray; margin-bottom:10px;">${escapeHtml(tagsHtml)}</div>
                     ${publicContactsHtml ? `<div style="font-size:13px; margin-bottom:10px;"><b>Public Contacts:</b><br>${publicContactsHtml}</div>` : ''}
+                    ${sharedContactsHtml}
                     ${messageBlock}
                     <div style="margin-top:12px;">${buttonsHtml}</div>
                 `;
@@ -357,8 +375,14 @@
         }
 
         async function handleActionNoModal(action, reqId) {
-            let msg = action === 'cancel' ? "Are you sure you want to cancel this request?" : "Are you sure you want to decline this request?";
-            if (!confirm(msg)) return;
+            let msg = "";
+            if (action === 'decline') {
+                msg = "Are you sure you want to decline this request?";
+            } else if (action === 'viewed') {
+                msg = "Mark this request as viewed? It will be removed from this list.";
+            }
+            
+            if (msg && !confirm(msg)) return;
             
             try {
                 let res = await fetch('/api/handle_request', {
