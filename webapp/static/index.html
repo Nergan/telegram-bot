@@ -69,7 +69,7 @@
         <div id="requests-list"></div>
     </div>
 
-    <!-- MODAL OVERLAY -->
+    <!-- EXCHANGING MODAL OVERLAY -->
     <div id="modal-overlay" class="modal-overlay hidden">
         <div class="modal-content">
             <h4 id="modal-title"></h4>
@@ -78,6 +78,18 @@
             <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
                 <button class="btn btn-primary" id="modal-confirm-btn" onclick="submitModal()"></button>
                 <button class="btn btn-danger" id="modal-cancel-btn" onclick="closeModal()"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CUSTOM NON-ALERT INTERFACE OVERLAY (Hides hosting domains) -->
+    <div id="custom-dialog-overlay" class="modal-overlay hidden" style="z-index: 1100;">
+        <div class="modal-content" style="text-align: center;">
+            <h4 id="dialog-title" style="margin-bottom: 10px;"></h4>
+            <p id="dialog-text" style="font-size: 14px; color: var(--tg-theme-text-color, #000); margin-bottom: 20px;"></p>
+            <div style="display: flex; justify-content: center; gap: 10px;">
+                <button class="btn btn-primary" id="dialog-ok-btn"></button>
+                <button class="btn btn-danger hidden" id="dialog-cancel-btn"></button>
             </div>
         </div>
     </div>
@@ -103,7 +115,8 @@
                 m_t: "Accept & Exchange", m_d: "Choose contacts to exchange:",
                 m_warn: "⚠️ No private contacts to share. Add one via bot first.",
                 m_c: "Confirm", m_x: "Cancel", err: "An error occurred.",
-                al_sel: "Select at least one contact.", al_dec: "Decline this request?", al_v: "Mark as viewed?"
+                al_sel: "Select at least one contact to share.", al_dec: "Decline this request?", al_v: "Mark this request as viewed? It will be removed from this list.",
+                info: "Alert", confirm_action: "Confirmation"
             },
             ru: {
                 edit_title: "Редактировать теги", filter_title: "Фильтры",
@@ -118,7 +131,8 @@
                 m_t: "Принять обмен", m_d: "Выберите контакты для передачи:",
                 m_warn: "⚠️ Нет приватных контактов. Сначала добавьте их в боте.",
                 m_c: "Подтвердить", m_x: "Отмена", err: "Произошла ошибка.",
-                al_sel: "Выберите хотя бы один контакт.", al_dec: "Отклонить запрос?", al_v: "Удалить из списка?"
+                al_sel: "Выберите хотя бы один контакт для обмена.", al_dec: "Отклонить этот запрос?", al_v: "Удалить этот запрос из списка?",
+                info: "Внимание", confirm_action: "Подтверждение"
             }
         };
         const _i = (k) => I18N[lang][k] || I18N['en'][k];
@@ -132,6 +146,59 @@
         let myPrivateContacts = [];
         let currentTab = 'received';
         let modalReqId = '';
+
+        // --- Custom Dialog System to completely replace native alert/confirm and block domain exposure ---
+        function showCustomAlert(text, onOk) {
+            document.getElementById('dialog-title').innerText = _i('info');
+            document.getElementById('dialog-text').innerText = text;
+            
+            const okBtn = document.getElementById('dialog-ok-btn');
+            okBtn.innerText = "OK";
+            okBtn.onclick = () => {
+                document.getElementById('custom-dialog-overlay').classList.add('hidden');
+                if (onOk) onOk();
+            };
+            
+            document.getElementById('dialog-cancel-btn').classList.add('hidden');
+            document.getElementById('custom-dialog-overlay').classList.remove('hidden');
+        }
+
+        function showCustomConfirm(text, onOk, onCancel) {
+            document.getElementById('dialog-title').innerText = _i('confirm_action');
+            document.getElementById('dialog-text').innerText = text;
+            
+            const okBtn = document.getElementById('dialog-ok-btn');
+            okBtn.innerText = _i('m_c');
+            okBtn.onclick = () => {
+                document.getElementById('custom-dialog-overlay').classList.add('hidden');
+                if (onOk) onOk();
+            };
+            
+            const cancelBtn = document.getElementById('dialog-cancel-btn');
+            cancelBtn.innerText = _i('m_x');
+            cancelBtn.classList.remove('hidden');
+            cancelBtn.onclick = () => {
+                document.getElementById('custom-dialog-overlay').classList.add('hidden');
+                if (onCancel) onCancel();
+            };
+            
+            document.getElementById('custom-dialog-overlay').classList.remove('hidden');
+        }
+
+        // --- Confirm button disabler if no private contact is checked ---
+        function updateModalButtonState() {
+            const selectedBoxes = document.querySelectorAll('input[name="private_contact"]:checked');
+            const confirmBtn = document.getElementById('modal-confirm-btn');
+            if (selectedBoxes.length === 0 && Array.isArray(myPrivateContacts) && myPrivateContacts.length > 0) {
+                confirmBtn.disabled = true;
+                confirmBtn.style.opacity = '0.5';
+                confirmBtn.style.cursor = 'not-allowed';
+            } else {
+                confirmBtn.disabled = false;
+                confirmBtn.style.opacity = '1';
+                confirmBtn.style.cursor = 'pointer';
+            }
+        }
 
         function setUI() {
             if(mode === 'edit') {
@@ -300,7 +367,6 @@
                 
                 const otherProf = r.other_profile || {};
                 
-                // MULTI-LANG TAG PARSING
                 let translatedTags = [];
                 if (Array.isArray(otherProf.tags)) {
                     otherProf.tags.forEach(tid => {
@@ -367,10 +433,11 @@
                 myPrivateContacts.forEach(c => {
                     const row = document.createElement('label');
                     row.className = 'checkbox-row';
-                    row.innerHTML = `<input type="checkbox" name="private_contact" value="${escapeHtml(c.id || '')}"> <span>${escapeHtml(c.value || '')}</span>`;
+                    row.innerHTML = `<input type="checkbox" name="private_contact" value="${escapeHtml(c.id || '')}" onchange="updateModalButtonState()"> <span>${escapeHtml(c.value || '')}</span>`;
                     checkboxesContainer.appendChild(row);
                 });
             }
+            updateModalButtonState();
             document.getElementById('modal-overlay').classList.remove('hidden');
         }
 
@@ -379,7 +446,7 @@
         async function submitModal() {
             const selectedBoxes = document.querySelectorAll('input[name="private_contact"]:checked');
             if (selectedBoxes.length === 0 && Array.isArray(myPrivateContacts) && myPrivateContacts.length > 0) {
-                alert(_i('al_sel')); return;
+                showCustomAlert(_i('al_sel')); return;
             }
             try {
                 let res = await fetch('/api/handle_request', {
@@ -387,21 +454,36 @@
                     body: JSON.stringify({ initData: tg.initData, req_id: modalReqId, action: 'accept', selected_contact_ids: Array.from(selectedBoxes).map(b => b.value) })
                 });
                 if (res.ok) { closeModal(); await loadRequests(); } 
-                else alert(_i('err'));
-            } catch (e) { alert(_i('err')); }
+                else {
+                    let err = await res.json();
+                    showCustomAlert(err.detail || _i('err'));
+                }
+            } catch (e) { showCustomAlert(_i('err')); }
         }
 
         async function handleActionNoModal(action, reqId) {
             let msg = action === 'decline' ? _i('al_dec') : (action === 'viewed' ? _i('al_v') : "");
-            if (msg && !confirm(msg)) return;
+            if (msg) {
+                showCustomConfirm(msg, async () => {
+                    await executeAction(action, reqId);
+                });
+            } else {
+                await executeAction(action, reqId);
+            }
+        }
+
+        async function executeAction(action, reqId) {
             try {
                 let res = await fetch('/api/handle_request', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ initData: tg.initData, req_id: reqId, action: action })
                 });
                 if (res.ok) await loadRequests(); 
-                else alert(_i('err'));
-            } catch (e) { alert(_i('err')); }
+                else {
+                    let err = await res.json();
+                    showCustomAlert(err.detail || _i('err'));
+                }
+            } catch (e) { showCustomAlert(_i('err')); }
         }
 
         document.getElementById('reqSearchInput').addEventListener('input', () => { renderRequests(); });

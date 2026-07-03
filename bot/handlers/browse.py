@@ -125,6 +125,7 @@ async def init_contact_inline(callback: types.CallbackQuery, state: FSMContext, 
     has_msg = action_type.endswith("msg")
     db_action = "send" if is_send else "req"
     
+    # Pre-Check for Spam duplicate requests
     existing_req = await Database.db.contact_requests.find_one({
         "initiator_id": callback.from_user.id,
         "target_id": target_prof['user_id'],
@@ -143,7 +144,7 @@ async def init_contact_inline(callback: types.CallbackQuery, state: FSMContext, 
     
     if has_msg:
         await state.set_state(ContactRequest.waiting_for_message)
-        await callback.message.answer(_("attach_msg_prompt", lang), reply_markup=skip_message_kb(lang))
+        await callback.message.answer(_("attach_msg", lang), reply_markup=skip_message_kb(lang))
         await callback.answer()
     else:
         await show_contact_selection(callback, state, lang)
@@ -161,7 +162,7 @@ async def show_contact_selection(event: types.CallbackQuery | types.Message, sta
     
     if not private_contacts and action == "req":
         await state.clear()
-        msg_err = _("err_no_priv_to_share", lang)
+        msg_err = _("err_no_priv", lang)
         if isinstance(event, types.CallbackQuery):
             await event.message.answer(msg_err)
         else:
@@ -176,9 +177,9 @@ async def show_contact_selection(event: types.CallbackQuery | types.Message, sta
     kb = contact_share_selection_kb(lang, private_contacts, selected_ids, action)
     
     if action == "req":
-        text = _("select_mutual_contacts_prompt", lang)
+        text = _("req_select_mut", lang)
     else:
-        text = _("select_send_contacts_prompt", lang)
+        text = _("req_select_send", lang)
         
     await state.set_state(ContactRequest.selecting_contacts)
     if isinstance(event, types.CallbackQuery):
