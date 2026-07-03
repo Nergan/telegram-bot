@@ -102,7 +102,7 @@ async def add_contact_fsm_start(callback: types.CallbackQuery, state: FSMContext
     await callback.message.answer(
         "Please send the contact detail.\n\n"
         "<b>Supported formats:</b>\n"
-        "• 🔗 <b>Link/Handle</b> (e.g., t.me/..., instagram.com/...)\n"
+        "• 🔗 <b>Link/Handle</b> (e.g., example.com/...)\n"
         "• 📱 <b>Phone Number</b> (must include country code, e.g., +1...)\n"
         "• 📍 <b>Address/Location</b> (e.g., New York, NY)\n"
         "• 📧 <b>Email</b>", 
