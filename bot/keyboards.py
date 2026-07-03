@@ -63,11 +63,17 @@ def profile_inline_kb(profile_uuid: str, sent_count: int = 0, recv_count: int = 
         ]
     ])
 
-def browse_inline_kb(target_uuid: str, has_self_private: bool = True, has_target_private: bool = True) -> InlineKeyboardMarkup:
+def browse_inline_kb(target_uuid: str, has_self_private: bool = True, has_target_private: bool = True, pending_actions: list = None) -> InlineKeyboardMarkup:
+    if pending_actions is None:
+        pending_actions = []
     buttons = []
     
     # Mutual Exchange Request Row
-    if not has_self_private:
+    if "req" in pending_actions:
+        buttons.append([
+            InlineKeyboardButton(text="⏳ Mutual Req Pending", callback_data="pending_alert")
+        ])
+    elif not has_self_private:
         buttons.append([
             InlineKeyboardButton(text="🔒 Request (Add your private info)", callback_data="no_private_alert")
         ])
@@ -82,10 +88,15 @@ def browse_inline_kb(target_uuid: str, has_self_private: bool = True, has_target
         ])
         
     # Unilateral Send Row
-    buttons.append([
-        InlineKeyboardButton(text="🤝 Send Contact", callback_data=f"send_{target_uuid}"),
-        InlineKeyboardButton(text="🤝 Send + Msg", callback_data=f"sendmsg_{target_uuid}")
-    ])
+    if "send" in pending_actions:
+        buttons.append([
+            InlineKeyboardButton(text="⏳ One-Way Pending", callback_data="pending_alert")
+        ])
+    else:
+        buttons.append([
+            InlineKeyboardButton(text="🤝 Send Contact", callback_data=f"send_{target_uuid}"),
+            InlineKeyboardButton(text="🤝 Send + Msg", callback_data=f"sendmsg_{target_uuid}")
+        ])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
