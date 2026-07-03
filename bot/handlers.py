@@ -88,7 +88,10 @@ async def capture_text(message: types.Message, state: FSMContext):
     active_prof = await Database.get_active_profile(message.from_user.id)
     await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {field: message.text}})
     logger.info(f"User {message.from_user.id} updated {field}.")
-    await message.answer("✅ Saved!")
+    
+    # Исправлено: явно возвращаем клавиатуру главного меню при отправке подтверждения сохранения
+    await message.answer("✅ Saved!", reply_markup=main_menu_kb())
+    
     updated = await Database.get_active_profile(message.from_user.id)
     await send_profile(message.chat.id, updated, profile_inline_kb(updated['public_uuid']))
     await state.clear()
@@ -115,7 +118,9 @@ async def capture_media(message: types.Message, state: FSMContext):
         if mg_id != message.media_group_id:
             await state.update_data(current_mg_id=message.media_group_id)
             await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": [media_doc]}})
-            await message.answer("✅ Processing album...")
+            
+            # Исправлено: при получении альбома сразу возвращаем клавиатуру главного меню
+            await message.answer("✅ Processing album...", reply_markup=main_menu_kb())
             
             async def show_updated_profile_after_delay():
                 await asyncio.sleep(1.5)
@@ -133,7 +138,10 @@ async def capture_media(message: types.Message, state: FSMContext):
             )
     else:
         await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": [media_doc]}})
-        await message.answer("✅ Media saved!")
+        
+        # Исправлено: возвращаем клавиатуру главного меню при одиночном сохранении файла
+        await message.answer("✅ Media saved!", reply_markup=main_menu_kb())
+        
         updated = await Database.get_active_profile(message.from_user.id)
         await send_profile(message.chat.id, updated, profile_inline_kb(updated['public_uuid']))
         await state.clear()
