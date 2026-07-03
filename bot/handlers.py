@@ -23,30 +23,6 @@ async def show_main_menu(message: types.Message, state: FSMContext):
     await message.answer("🏠 View Active Profile 🏠", reply_markup=main_menu_kb())
     await send_profile(message.chat.id, active_profile, profile_inline_kb(active_profile['public_uuid']))
 
-@router.callback_query(F.data.in_({"my_profile", "my_profiles"}))
-async def show_main_menu_callback(callback: types.CallbackQuery, state: FSMContext):
-    """Обработчик старых инлайновых кнопок 'My Profile' из истории переписки"""
-    await state.clear()
-    active_profile = await Database.get_or_create_active_profile(callback.from_user.id, callback.from_user.username)
-    await callback.message.answer("🏠 View Active Profile 🏠", reply_markup=main_menu_kb())
-    await send_profile(callback.from_user.id, active_profile, profile_inline_kb(active_profile['public_uuid']))
-    await callback.answer()
-
-@router.message(F.text == "🔒 View Private Contacts")
-async def view_private_contacts(message: types.Message):
-    active_prof = await Database.get_active_profile(message.from_user.id)
-    await Database.sync_telegram_username(active_prof, message.from_user.username)
-    active_prof = await Database.get_active_profile(message.from_user.id)
-    
-    private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
-    if private_contacts:
-        text = "🔒 <b>Your Private Contacts:</b>\n\n"
-        for c in private_contacts:
-            text += f"• <code>{html.escape(c['value'])}</code>\n"
-        await message.answer(text)
-    else:
-        await message.answer("🔒 You have not set any Private Contacts yet.")
-
 # --- FSM CAPTURE ---
 
 @router.message(F.text == "📝 Edit Info")
@@ -92,11 +68,33 @@ async def capture_new_contact(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     active_prof = await Database.get_active_profile(user_id)
     
+    # Ограничение 1: Максимум 8 контактов на профиль
+    contacts = active_prof.get("contacts", [])
+    if len(contacts) >= 8:
+        await state.clear()
+        await message.answer("❌ You can have a maximum of 8 contacts per profile.", reply_markup=main_menu_kb())
+        await manage_contacts_menu(message)
+        return
+        
+    contact_val = message.text.strip()
+    
+    # Ограничение 2: Максимум 100 символов
+    if len(contact_val) > 100:
+        return await message.answer("❌ Contact details must be 100 characters or less. Please try again:")
+        
+    # Ограничение 3: Запрет переноса строк
+    if "\n" in contact_val or "\r" in contact_val:
+        return await message.answer("❌ Contact details must be a single line (no line breaks). Please try again:")
+        
+    # Ограничение 4: Базовая валидация длины
+    if len(contact_val) < 3:
+        return await message.answer("❌ Contact details are too short. Please try again:")
+    
     cid = uuid.uuid4().hex[:8]
     new_contact = {
         "id": cid,
         "type": "custom",
-        "value": message.text,
+        "value": contact_val,
         "is_public": False 
     }
     
@@ -111,6 +109,7 @@ async def capture_new_contact(message: types.Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("togglecon_"))
 async def toggle_contact_visibility(callback: types.CallbackQuery):
+    # Исправлено: безопасное извлечение ID с помощью replace предотвращает ошибки со сплиттером
     cid = callback.data.replace("togglecon_", "", 1)
     active_prof = await Database.get_active_profile(callback.from_user.id)
     
@@ -139,6 +138,7 @@ async def toggle_contact_visibility(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("delcon_"))
 async def delete_contact(callback: types.CallbackQuery):
+    # Исправлено: безопасное извлечение ID
     cid = callback.data.replace("delcon_", "", 1)
     if cid == "tg_username":
         return await callback.answer("❌ You cannot delete your Telegram username contact.", show_alert=True)
@@ -251,7 +251,6 @@ async def capture_media(message: types.Message, state: FSMContext):
 
 @router.message(F.text == "👥 Profiles")
 async def profiles_menu(message: types.Message, state: FSMContext = None):
-    # Сбрасываем возможные FSM-состояния при переходе в список профилей
     if state:
         await state.clear()
         
@@ -262,9 +261,7 @@ async def profiles_menu(message: types.Message, state: FSMContext = None):
     inline_kb = []
     for p in profiles:
         status = "🌟 Active" if p.get("is_active") else "⚪ Inactive"
-        if p.get("is_hidden"): status += " 👻 Hidden"
         
-        # Добавляем до 12 символов из био перед ID, если оно заполнено
         bio = p.get("text", "") or ""
         bio_clean = bio.strip().replace("\n", " ")
         if bio_clean:
@@ -298,7 +295,6 @@ async def del_all_but_active(message: types.Message):
 
 @router.callback_query(F.data.startswith("manage_prof_"))
 async def manage_prof_cb(callback: types.CallbackQuery, state: FSMContext):
-    # Безопасное снятие FSM-блокировок при переходе в профиль
     await state.clear()
     
     prof_uuid = callback.data.split("_")[2]
@@ -311,7 +307,7 @@ async def manage_prof_cb(callback: types.CallbackQuery, state: FSMContext):
     await send_profile(callback.from_user.id, profile, manage_action_kb())
     await callback.answer()
 
-@router.message(F.text.in_({"🌟 Set Active", "👁️ Toggle Vis", "🔄 Regen ID", "🗑️ Delete"}))
+@router.message(F.text.in_({"🌟 Set Active", "🔄 Regen ID", "🗑️ Delete"}))
 async def manage_actions(message: types.Message, state: FSMContext):
     data = await state.get_data()
     prof_uuid = data.get("managing_uuid")
@@ -325,10 +321,6 @@ async def manage_actions(message: types.Message, state: FSMContext):
         await Database.set_active_profile(user_id, prof_uuid)
         await message.answer("🌟 Profile Activated!")
         await show_main_menu(message, state)
-    elif message.text == "👁️ Toggle Vis":
-        await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"is_hidden": not p.get('is_hidden', False)}})
-        await message.answer("👁️ Visibility toggled.")
-        await profiles_menu(message)
     elif message.text == "🔄 Regen ID":
         new_uuid = uuid.uuid4().hex[:8]
         await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"public_uuid": new_uuid}})
@@ -355,7 +347,7 @@ async def browse_next(message: types.Message, state: FSMContext):
     seen_uuids = await Database.get_seen_profiles(user_id)
     
     filters = active.get("filters", {})
-    and_clauses = [{"user_id": {"$ne": user_id}}, {"is_active": True}, {"is_hidden": False}]
+    and_clauses = [{"user_id": {"$ne": user_id}}, {"is_active": True}]
     if filters.get("require_tags"): and_clauses.append({"tags": {"$all": filters["require_tags"]}})
     if filters.get("exclude_tags"): and_clauses.append({"tags": {"$nin": filters["exclude_tags"]}})
     if filters.get("any_tags"): and_clauses.append({"tags": {"$in": filters["any_tags"]}})
@@ -432,7 +424,7 @@ async def init_contact_inline(callback: types.CallbackQuery, state: FSMContext):
         else:
             await callback.answer("Sending request...")
             await execute_contact_request(callback.from_user.id, state, message=None)
-            await callback.message.answer(f"✅ Request sent to {target_uuid}!", reply_markup=browse_kb())
+            await callback.message.answer(f"✅ Request sent to <code>{target_uuid}</code>!", reply_markup=browse_kb())
 
 async def show_contact_selection(event: types.CallbackQuery | types.Message, state: FSMContext):
     user_id = event.from_user.id
@@ -536,7 +528,7 @@ async def confirm_share_contacts_cb(callback: types.CallbackQuery, state: FSMCon
         await state.update_data(shared_contacts=shared_contacts)
         await execute_contact_request(callback.from_user.id, state, message=None)
         await callback.message.delete()
-        await callback.message.answer(f"✅ Contact details shared with {target_uuid}!", reply_markup=browse_kb())
+        await callback.message.answer(f"✅ Contact details shared with <code>{target_uuid}</code>!", reply_markup=browse_kb())
 
 @router.callback_query(F.data == "cancel_share_contacts", ContactRequest.selecting_contacts)
 async def cancel_share_contacts_cb(callback: types.CallbackQuery, state: FSMContext):
@@ -555,7 +547,7 @@ async def skip_contact_msg(callback: types.CallbackQuery, state: FSMContext):
         target_uuid = data['target_uuid']
         await callback.message.delete()
         await execute_contact_request(callback.from_user.id, state, message=None)
-        await callback.message.answer(f"✅ Request sent to {target_uuid}!", reply_markup=browse_kb())
+        await callback.message.answer(f"✅ Request sent to <code>{target_uuid}</code>!", reply_markup=browse_kb())
 
 @router.message(ContactRequest.waiting_for_message)
 async def capture_contact_msg(message: types.Message, state: FSMContext):
@@ -570,7 +562,7 @@ async def capture_contact_msg(message: types.Message, state: FSMContext):
     else:
         target_uuid = data['target_uuid']
         await execute_contact_request(message.from_user.id, state, message)
-        await message.answer(f"✅ Request sent to {target_uuid} with message!", reply_markup=browse_kb())
+        await message.answer(f"✅ Request sent to <code>{target_uuid}</code> with message!", reply_markup=browse_kb())
 
 async def execute_contact_request(user_id: int, state: FSMContext, message=None):
     data = await state.get_data()

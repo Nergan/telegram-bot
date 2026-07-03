@@ -65,7 +65,6 @@ class Database:
             "text": None,
             "media": [], 
             "is_active": False,
-            "is_hidden": False,
             "created_at": datetime.datetime.now(datetime.timezone.utc)
         }
         if await cls.db.profiles.count_documents({"user_id": user_id}) == 0:

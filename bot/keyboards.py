@@ -1,13 +1,14 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
 from core.config import WEBHOOK_URL
 
-# --- REPLY KEYBOARDS ---
+# --- REPLY KEYBOARDS (Нижние кнопки меню) ---
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
+    """Главное меню (удалена кнопка просмотра приватных контактов)"""
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🔍 Browse")],
         [KeyboardButton(text="📝 Edit Info"), KeyboardButton(text="📸 Edit Media")],
-        [KeyboardButton(text="👥 Profiles"), KeyboardButton(text="🔒 View Private Contacts")]
+        [KeyboardButton(text="👥 Profiles")]
     ], resize_keyboard=True)
 
 def edit_info_menu_kb() -> ReplyKeyboardMarkup:
@@ -29,21 +30,22 @@ def browse_kb() -> ReplyKeyboardMarkup:
     ], resize_keyboard=True)
 
 def manage_action_kb() -> ReplyKeyboardMarkup:
+    """Убрана кнопка переключения видимости (скрытия)"""
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🌟 Set Active"), KeyboardButton(text="👁️ Toggle Vis")],
+        [KeyboardButton(text="🌟 Set Active")],
         [KeyboardButton(text="🔄 Regen ID"), KeyboardButton(text="🗑️ Delete")],
         [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
 
 def profiles_menu_kb() -> ReplyKeyboardMarkup:
-    """Убрана кнопка💣 Delete All Profiles"""
+    """Убрана кнопка удаления всех профилей"""
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="➕ Create Profile")],
         [KeyboardButton(text="🗑️ Delete All But Active")],
         [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
 
-# --- INLINE KEYBOARDS ---
+# --- INLINE KEYBOARDS (Кнопки под сообщениями) ---
 
 def profile_inline_kb(profile_uuid: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
