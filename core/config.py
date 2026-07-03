@@ -8,13 +8,9 @@ MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "dating_bot_secure_path_abc123")
 
-# Bot Commands
+# Оставляем только одну единственную рабочую команду для меню Telegram
 BOT_COMMANDS = [
-    ("start", "Restart bot or deep-link to a profile"),
-    ("menu", "Open main navigation menu"),
-    ("browse", "Start browsing the profile pool"),
-    ("profiles", "Manage your profiles"),
-    ("search", "Find a profile by ID (e.g., /search a1b2c3d4)")
+    ("start", "Start or restart the bot")
 ]
 
 # Advanced Tags Dictionary

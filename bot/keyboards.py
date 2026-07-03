@@ -4,7 +4,6 @@ from core.config import WEBHOOK_URL
 # --- REPLY KEYBOARDS (Нижние кнопки меню) ---
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
-    """Упрощенное главное меню (кнопки Web App перенесены в Inline под саму анкету)"""
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🔍 Browse")],
         [KeyboardButton(text="📝 Edit Info"), KeyboardButton(text="📸 Edit Media")],
@@ -19,13 +18,8 @@ def edit_info_menu_kb() -> ReplyKeyboardMarkup:
     ], resize_keyboard=True)
 
 def edit_fsm_kb() -> ReplyKeyboardMarkup:
+    """Универсальная клавиатура для всех состояний изменения текста и медиа"""
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="❌ Cancel"), KeyboardButton(text="🗑️ Clear Field")]
-    ], resize_keyboard=True)
-
-def edit_media_fsm_kb() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="✅ Done (Save Media)")],
         [KeyboardButton(text="❌ Cancel"), KeyboardButton(text="🗑️ Clear Field")]
     ], resize_keyboard=True)
 
@@ -44,17 +38,15 @@ def manage_action_kb() -> ReplyKeyboardMarkup:
     ], resize_keyboard=True)
 
 def profiles_menu_kb() -> ReplyKeyboardMarkup:
-    """Нижняя Reply-клавиатура для меню работы со списком профилей"""
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="➕ Create Profile")],
-        [KeyboardButton(text="🗑️ Delete All But Active")],  # Добавлена кнопка по запросу пользователя
+        [KeyboardButton(text="🗑️ Delete All But Active")],
         [KeyboardButton(text="🏠 Main Menu")]
     ], resize_keyboard=True)
 
 # --- INLINE KEYBOARDS (Кнопки под сообщениями) ---
 
 def profile_inline_kb(profile_uuid: str) -> InlineKeyboardMarkup:
-    """Инлайн-кнопки под анкетой (решает проблему с отсутствием initData в Reply Keyboard)"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🏷️ Tags", web_app=WebAppInfo(url=f"{WEBHOOK_URL}/webapp?mode=edit&profile_id={profile_uuid}")),
