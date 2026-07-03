@@ -6,12 +6,12 @@ def truncate(text: str, limit: int = 4000) -> str:
     if not text: return ""
     return text if len(text) <= limit else text[:limit-3] + "..."
 
-async def send_profile(chat_id: int, profile: dict, kb, is_main_menu: bool = False):
-    """Accurately mimics the public view. Erases Private Contacts and Filters from the string."""
+async def send_profile(chat_id: int, profile: dict, kb):
+    """Отображает анкету в публичном виде без посторонних плашек."""
     await bot.send_chat_action(chat_id, "typing")
     
+    # Больше нет префикса "YOUR ACTIVE PROFILE" — анкета выглядит одинаково для всех
     text = f"<b>ID:</b> <code>{profile['public_uuid']}</code>\n\n"
-    if is_main_menu: text = f"🏠 <b>YOUR ACTIVE PROFILE</b>\n" + text
         
     if profile.get('text'): text += f"📝 <b>Bio:</b>\n{html.escape(profile['text'])}\n\n"
     if profile.get('public_contact'): text += f"🌐 <b>Public Contacts:</b>\n{html.escape(profile['public_contact'])}\n\n"
@@ -40,7 +40,8 @@ async def send_profile(chat_id: int, profile: dict, kb, is_main_menu: bool = Fal
                 elif m['type'] == 'video': media_group.append(InputMediaVideo(media=m['file_id'], caption=cap))
             
             await bot.send_media_group(chat_id, media=media_group)
-            await bot.send_message(chat_id, "👇 Menu:", reply_markup=kb)
+            # Изменено: заменено "👇 Menu:" на более эстетичное и аккуратное "⚙️ Options:"
+            await bot.send_message(chat_id, "⚙️ Options:", reply_markup=kb)
             
     except Exception as e:
         # Diagnostic printing ensures the user knows WHY Telegram rejected the API call.

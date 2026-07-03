@@ -1,5 +1,6 @@
 import uuid
 import html
+import asyncio  # Добавлен импорт для фонового ожидания при загрузке альбомов
 from aiogram import Router, F, types
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
@@ -16,7 +17,10 @@ router = Router()
 async def show_main_menu(message: types.Message, state: FSMContext):
     await state.clear()
     active_profile = await Database.get_or_create_active_profile(message.from_user.id)
-    await send_profile(message.chat.id, active_profile, main_menu_kb(active_profile['public_uuid']), is_main_menu=True)
+    # 1. Сначала отправляем меню команд главного меню
+    await message.answer("🏠 Main Menu", reply_markup=main_menu_kb())
+    # 2. Отображаем сам профиль с встроенными кнопками тегов/фильтров
+    await send_profile(message.chat.id, active_profile, profile_inline_kb(active_profile['public_uuid']))
 
 @router.message(F.text == "🔒 View Private Contacts")
 async def view_private_contacts(message: types.Message):
@@ -46,7 +50,7 @@ async def init_edit_text(message: types.Message, state: FSMContext):
 @router.message(F.text == "📸 Edit Media")
 async def init_edit_media(message: types.Message, state: FSMContext):
     await state.set_state(ProfileSetup.waiting_for_media)
-    await message.answer("Send a single media file, OR an album of up to 10 photos/videos in one message.", reply_markup=edit_fsm_kb())
+    await message.answer("Send a single media file, OR an album of up to 10 photos/videos in one message.", reply_markup=edit_media_fsm_kb())
 
 # --- FSM ACTIONS (Cancel / Clear) ---
 
@@ -89,9 +93,9 @@ async def capture_text(message: types.Message, state: FSMContext):
     await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {field: message.text}})
     await message.answer("✅ Saved!")
     
-    # Auto-refresh main menu
+    # Автоматически обновляем и показываем анкету с новыми встроенными кнопками
     updated = await Database.get_active_profile(message.from_user.id)
-    await send_profile(message.chat.id, updated, main_menu_kb(updated['public_uuid']), is_main_menu=True)
+    await send_profile(message.chat.id, updated, profile_inline_kb(updated['public_uuid']))
     await state.clear()
 
 @router.message(ProfileSetup.waiting_for_media)
@@ -110,27 +114,38 @@ async def capture_media(message: types.Message, state: FSMContext):
     elif message.audio: media_doc['file_id'] = message.audio.file_id
     elif message.document: media_doc['file_id'] = message.document.file_id
     
-    # Media Group Logic (Albums arrive rapidly in succession)
+    # Обработка альбомов
     if message.media_group_id:
         data = await state.get_data()
         mg_id = data.get("current_mg_id")
         if mg_id != message.media_group_id:
-            # First item of a new album
+            # Прием первого файла из альбома
             await state.update_data(current_mg_id=message.media_group_id)
             await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": [media_doc]}})
-            await message.answer("✅ Processing album...", reply_markup=main_menu_kb(active_prof['public_uuid']))
+            await message.answer("✅ Processing album...")
+            
+            # Асинхронно ждем завершения загрузки всего альбома и показываем обновленный профиль
+            async def show_updated_profile_after_delay():
+                await asyncio.sleep(1.5)
+                curr_state = await state.get_state()
+                if curr_state == ProfileSetup.waiting_for_media:
+                    updated = await Database.get_active_profile(message.from_user.id)
+                    await send_profile(message.chat.id, updated, profile_inline_kb(updated['public_uuid']))
+                    await state.clear()
+            
+            asyncio.create_task(show_updated_profile_after_delay())
         else:
-            # Append subsequent items
+            # Последующие файлы альбома просто добавляются в массив
             await Database.db.profiles.update_one(
                 {"public_uuid": active_prof['public_uuid']}, 
                 {"$push": {"media": {"$each": [media_doc], "$slice": 10}}}
             )
     else:
-        # Single file
+        # Одиночный медиафайл
         await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": [media_doc]}})
         await message.answer("✅ Media saved!")
         updated = await Database.get_active_profile(message.from_user.id)
-        await send_profile(message.chat.id, updated, main_menu_kb(updated['public_uuid']), is_main_menu=True)
+        await send_profile(message.chat.id, updated, profile_inline_kb(updated['public_uuid']))
         await state.clear()
 
 # --- PROFILES MANAGEMENT ---
@@ -147,9 +162,15 @@ async def profiles_menu(message: types.Message):
         if p.get("is_hidden"): status += " 👻 Hidden"
         inline_kb.append([InlineKeyboardButton(text=f"{p['public_uuid']} [{status}]", callback_data=f"manage_prof_{p['public_uuid']}")])
         
-    await message.answer(f"👥 <b>Manage Profiles ({count}/100)</b>\nSelect an identity below:", reply_markup=profiles_menu_kb())
+    # 1. Отправляем Reply Keyboard для управления списком профилей
+    await message.answer("👥 Profiles Menu", reply_markup=profiles_menu_kb())
+    
+    # 2. Объединяем сообщения: выводим количество и inline-кнопки в ОДНОМ аккуратном сообщении
     if inline_kb:
-        await message.answer("Your profiles:", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_kb))
+        await message.answer(
+            f"👥 <b>Manage Profiles ({count}/100)</b>\nSelect an identity below:", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_kb)
+        )
 
 @router.message(F.text == "➕ Create Profile")
 @router.message(Command("create_profile"))
@@ -215,7 +236,7 @@ async def manage_actions(message: types.Message, state: FSMContext):
         new_uuid = uuid.uuid4().hex[:8]
         await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"public_uuid": new_uuid}})
         await state.update_data(managing_uuid=new_uuid)
-        await message.answer(f"🔄 ID Regenerated: {new_uuid}")
+        # Удалено лишнее текстовое оповещение: сразу присылаем готовую обновленную анкету
         p = await Database.get_profile_by_uuid(new_uuid)
         await send_profile(message.chat.id, p, manage_action_kb())
     elif message.text == "🗑️ Delete":
@@ -242,7 +263,7 @@ async def browse_next(message: types.Message, state: FSMContext):
     cursor = Database.db.profiles.aggregate([{"$match": {"$and": and_clauses}}, {"$sample": {"size": 1}}])
     profiles = await cursor.to_list(length=1)
     
-    if not profiles: return await message.answer("No matching profiles found!", reply_markup=main_menu_kb(active['public_uuid']))
+    if not profiles: return await message.answer("No matching profiles found!", reply_markup=main_menu_kb())
 
     target = profiles[0]
     await state.update_data(browse_uuid=target['public_uuid'])
@@ -295,6 +316,6 @@ async def unhandled_message(message: types.Message, state: FSMContext):
     else:
         active = await Database.get_active_profile(message.from_user.id)
         if active:
-            await message.answer("🤷 Unrecognized command. Please use the menu buttons below.", reply_markup=main_menu_kb(active['public_uuid']))
+            await message.answer("🤷 Unrecognized command. Please use the menu buttons below.", reply_markup=main_menu_kb())
         else:
             await message.answer("🤷 Send /start to begin.")
