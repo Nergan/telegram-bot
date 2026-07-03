@@ -19,9 +19,11 @@ class LoggingMiddleware(BaseMiddleware):
             action_type = "callback_query"
             log_data = {"data": event.callback_query.data}
         
+        lang = "en"
         if user_id:
-            # Fire and forget logging
+            lang = await Database.get_user_lang(user_id)
             import asyncio
             asyncio.create_task(Database.log_action(user_id, action_type, log_data))
             
+        data["lang"] = lang
         return await handler(event, data)

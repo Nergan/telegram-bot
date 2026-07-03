@@ -169,3 +169,13 @@ class Database:
         })
         logger.info(f"Pending requests count for {user_id}: sent={sent}, recv={recv}")
         return sent, recv
+    
+    # Add these methods under Session Tracking
+    @classmethod
+    async def set_user_lang(cls, user_id: int, lang: str):
+        await cls.db.user_settings.update_one({"user_id": user_id}, {"$set": {"lang": lang}}, upsert=True)
+
+    @classmethod
+    async def get_user_lang(cls, user_id: int) -> str:
+        settings = await cls.db.user_settings.find_one({"user_id": user_id})
+        return settings.get("lang", "en") if settings else "en"

@@ -38,47 +38,46 @@
 </head>
 <body>
     <div id="tags-section">
-        <h3 id="title">Tags Interface</h3>
+        <h3 id="title"></h3>
         <p id="legend" style="font-size: 12px; color: gray;"></p>
         <p id="error-msg"></p>
         
         <div class="section" id="sel-section">
-            <h4>Selected / Active</h4>
+            <h4 id="h4-sel"></h4>
             <div id="selected-container"></div>
         </div>
 
-        <input type="text" id="searchInput" placeholder="Search available tags...">
+        <input type="text" id="searchInput">
         
         <div class="section">
-            <h4>Available</h4>
+            <h4 id="h4-avail"></h4>
             <div id="available-container"></div>
         </div>
     </div>
 
     <!-- REQUESTS HUB SECTION -->
     <div id="requests-section" class="hidden">
-        <h3 id="req-title">Pending Contact Requests</h3>
-        <p id="req-legend" style="font-size: 12px; color: gray; margin-bottom: 15px;">Manage active sent and received mutual requests.</p>
+        <h3 id="req-title"></h3>
+        <p id="req-legend" style="font-size: 12px; color: gray; margin-bottom: 15px;"></p>
         
         <div class="tabs">
-            <button class="tab-btn active" id="tab-received" onclick="switchTab('received')">📥 Received</button>
-            <button class="tab-btn" id="tab-sent" onclick="switchTab('sent')">📤 Sent</button>
+            <button class="tab-btn active" id="tab-received" onclick="switchTab('received')"></button>
+            <button class="tab-btn" id="tab-sent" onclick="switchTab('sent')"></button>
         </div>
 
-        <input type="text" id="reqSearchInput" placeholder="Search across tags, bio, contacts, ID...">
-        
+        <input type="text" id="reqSearchInput">
         <div id="requests-list"></div>
     </div>
 
     <!-- MODAL OVERLAY -->
     <div id="modal-overlay" class="modal-overlay hidden">
         <div class="modal-content">
-            <h4 id="modal-title">Accept & Share Contacts</h4>
-            <p id="modal-desc" style="font-size: 12px; color: gray; margin-bottom: 15px;">Choose which private contacts to mutually exchange with this user:</p>
+            <h4 id="modal-title"></h4>
+            <p id="modal-desc" style="font-size: 12px; color: gray; margin-bottom: 15px;"></p>
             <div id="checkboxes-container"></div>
             <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
-                <button class="btn btn-primary" id="modal-confirm-btn" onclick="submitModal()">Confirm & Exchange</button>
-                <button class="btn btn-danger" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" id="modal-confirm-btn" onclick="submitModal()"></button>
+                <button class="btn btn-danger" id="modal-cancel-btn" onclick="closeModal()"></button>
             </div>
         </div>
     </div>
@@ -88,7 +87,42 @@
         const urlParams = new URLSearchParams(window.location.search);
         const mode = urlParams.get('mode') || 'edit';
         const profile_id = urlParams.get('profile_id');
+        const lang = urlParams.get('lang') || 'en';
         
+        const I18N = {
+            en: {
+                edit_title: "Edit Profile Tags", filter_title: "Advanced Filter",
+                edit_leg: "Tap to select.", filt_leg: "Tap: 🟩 Must have | 🟥 Exclude | 🟦 Any",
+                sel_active: "Selected / Active", avail: "Available", search_tag: "Search tags...",
+                save: "Save & Apply", req_t: "Pending Requests", req_l: "Manage your mutual/one-way requests.",
+                tab_r: "📥 Received", tab_s: "📤 Sent", req_search: "Search across tags, bio, contacts...",
+                no_req: "No pending requests.", bio_emp: "<i>No bio set.</i>", pub_c: "<b>Public Contacts:</b>",
+                msg: "<b>Message:</b>", btn_v: "👁️ Mark as Viewed", btn_a: "✅ Accept & Exchange",
+                btn_d: "❌ Decline", wait: "Waiting for response...", 
+                ow_share: "ONE-WAY SHARE", mut_req: "MUTUAL EXCHANGE", shr_prv: "<b>Shared Private Contacts:</b>",
+                m_t: "Accept & Exchange", m_d: "Choose contacts to exchange:",
+                m_warn: "⚠️ No private contacts to share. Add one via bot first.",
+                m_c: "Confirm", m_x: "Cancel", err: "An error occurred.",
+                al_sel: "Select at least one contact.", al_dec: "Decline this request?", al_v: "Mark as viewed?"
+            },
+            ru: {
+                edit_title: "Редактировать теги", filter_title: "Фильтры",
+                edit_leg: "Нажмите для выбора.", filt_leg: "Нажатие: 🟩 Обязательно | 🟥 Исключить | 🟦 Любой",
+                sel_active: "Выбранные", avail: "Доступные", search_tag: "Поиск тегов...",
+                save: "Сохранить", req_t: "Активные запросы", req_l: "Управление вашими запросами.",
+                tab_r: "📥 Полученные", tab_s: "📤 Отправленные", req_search: "Поиск по био, тегам, ID...",
+                no_req: "Запросов пока нет.", bio_emp: "<i>О себе не заполнено.</i>", pub_c: "<b>Публичные:</b>",
+                msg: "<b>Сообщение:</b>", btn_v: "👁️ Отметить просмотренным", btn_a: "✅ Принять обмен",
+                btn_d: "❌ Отклонить", wait: "Ожидание ответа...", 
+                ow_share: "ОДНОСТОРОННЯЯ ОТПРАВКА", mut_req: "ЗАПРОС НА ОБМЕН", shr_prv: "<b>Переданные контакты:</b>",
+                m_t: "Принять обмен", m_d: "Выберите контакты для передачи:",
+                m_warn: "⚠️ Нет приватных контактов. Сначала добавьте их в боте.",
+                m_c: "Подтвердить", m_x: "Отмена", err: "Произошла ошибка.",
+                al_sel: "Выберите хотя бы один контакт.", al_dec: "Отклонить запрос?", al_v: "Удалить из списка?"
+            }
+        };
+        const _i = (k) => I18N[lang][k] || I18N['en'][k];
+
         let allTags = {{AVAILABLE_TAGS_JSON}}; 
         let stateMap = {};
 
@@ -99,15 +133,30 @@
         let currentTab = 'received';
         let modalReqId = '';
 
-        if(mode === 'edit') {
-            document.getElementById('title').innerText = 'Edit Profile Tags';
-            document.getElementById('legend').innerText = 'Tap to select.';
-        } else if (mode === 'filter') {
-            document.getElementById('title').innerText = 'Advanced Filter';
-            document.getElementById('legend').innerHTML = 'Tap to cycle: 🟩 Must have | 🟥 Exclude | 🟦 Any';
+        function setUI() {
+            if(mode === 'edit') {
+                document.getElementById('title').innerText = _i('edit_title');
+                document.getElementById('legend').innerText = _i('edit_leg');
+            } else if (mode === 'filter') {
+                document.getElementById('title').innerText = _i('filter_title');
+                document.getElementById('legend').innerText = _i('filt_leg');
+            }
+            document.getElementById('h4-sel').innerText = _i('sel_active');
+            document.getElementById('h4-avail').innerText = _i('avail');
+            document.getElementById('searchInput').placeholder = _i('search_tag');
+            document.getElementById('req-title').innerText = _i('req_t');
+            document.getElementById('req-legend').innerText = _i('req_l');
+            document.getElementById('tab-received').innerText = _i('tab_r');
+            document.getElementById('tab-sent').innerText = _i('tab_s');
+            document.getElementById('reqSearchInput').placeholder = _i('req_search');
+            document.getElementById('modal-title').innerText = _i('m_t');
+            document.getElementById('modal-desc').innerText = _i('m_d');
+            document.getElementById('modal-confirm-btn').innerText = _i('m_c');
+            document.getElementById('modal-cancel-btn').innerText = _i('m_x');
         }
 
         async function init() {
+            setUI();
             if (mode === 'requests') {
                 document.getElementById('tags-section').classList.add('hidden');
                 document.getElementById('requests-section').classList.remove('hidden');
@@ -133,16 +182,11 @@
                         if(f.exclude_tags) f.exclude_tags.forEach(t => { if(t in stateMap) stateMap[t] = 2; });
                         if(f.any_tags) f.any_tags.forEach(t => { if(t in stateMap) stateMap[t] = 3; });
                     }
-                } else {
-                    document.getElementById('error-msg').innerText = "Make your selections below:";
                 }
-            } catch (e) {
-                console.error(e);
-            }
+            } catch (e) { console.error(e); }
             renderTags();
         }
 
-        // --- TAGS RENDERING ---
         function renderTags() {
             const selCont = document.getElementById('selected-container');
             const availCont = document.getElementById('available-container');
@@ -150,7 +194,11 @@
 
             allTags.forEach(tag => {
                 const el = document.createElement('div');
-                el.innerText = tag.display; el.dataset.aliases = tag.aliases.join(' ').toLowerCase();
+                const tDisp = tag.display[lang] || tag.display['en'];
+                const tAlias = (tag.aliases[lang] || tag.aliases['en']).join(' ').toLowerCase();
+                
+                el.innerText = tDisp; 
+                el.dataset.aliases = tAlias;
                 el.className = 'tag';
                 let st = stateMap[tag.id];
                 
@@ -164,7 +212,7 @@
                 el.onclick = () => {
                     if(mode === 'edit') stateMap[tag.id] = st === 1 ? 0 : 1;
                     else stateMap[tag.id] = (st + 1) % 4;
-                    tg.MainButton.setText("Save & Apply"); tg.MainButton.show();
+                    tg.MainButton.setText(_i('save')); tg.MainButton.show();
                     renderTags(); 
                 };
 
@@ -193,7 +241,6 @@
             tg.close();
         });
 
-        // --- REQUESTS LOGIC ---
         async function loadRequests() {
             try {
                 let res = await fetch('/api/get_requests', {
@@ -208,16 +255,10 @@
                     myPrivateContacts = data.my_private_contacts || [];
                     renderRequests();
                 } else {
-                    let errText = "Failed to load requests.";
-                    try {
-                        let errObj = await res.json();
-                        errText = errObj.detail || errText;
-                    } catch(_) {}
-                    document.getElementById('requests-list').innerHTML = `<p style='color:red;'>${escapeHtml(errText)}</p>`;
+                    document.getElementById('requests-list').innerHTML = `<p style='color:red;'>${_i('err')}</p>`;
                 }
             } catch (e) {
-                console.error(e);
-                document.getElementById('requests-list').innerHTML = "<p style='color:red;'>An error occurred while loading requests.</p>";
+                document.getElementById('requests-list').innerHTML = `<p style='color:red;'>${_i('err')}</p>`;
             }
         }
 
@@ -242,16 +283,14 @@
                 const pUuid = (otherProf.public_uuid || '').toLowerCase();
                 const publicCon = Array.isArray(otherProf.public_contacts) ? otherProf.public_contacts.join(' ').toLowerCase() : '';
                 const msg = (r.message || '').toLowerCase();
-                
-                // Extra search fields
                 const sharedCon = Array.isArray(r.shared_contacts) ? r.shared_contacts.join(' ').toLowerCase() : '';
-                const reqTypeLabel = (r.action === 'send' ? 'one-way share' : 'mutual exchange request').toLowerCase();
+                const reqTypeLabel = (r.action === 'send' ? _i('ow_share') : _i('mut_req')).toLowerCase();
                 
                 return bio.includes(q) || tags.includes(q) || pUuid.includes(q) || publicCon.includes(q) || msg.includes(q) || sharedCon.includes(q) || reqTypeLabel.includes(q);
             });
             
             if (filtered.length === 0) {
-                listContainer.innerHTML = `<p style="text-align:center; color:gray; margin-top:20px;">No pending requests found.</p>`;
+                listContainer.innerHTML = `<p style="text-align:center; color:gray; margin-top:20px;">${_i('no_req')}</p>`;
                 return;
             }
             
@@ -260,40 +299,42 @@
                 card.className = 'req-card';
                 
                 const otherProf = r.other_profile || {};
-                let tagsHtml = Array.isArray(otherProf.tags) ? otherProf.tags.map(t => `#${t}`).join(' ') : '';
-                let publicContactsHtml = Array.isArray(otherProf.public_contacts) ? otherProf.public_contacts.map(c => `• <code>${escapeHtml(c)}</code>`).join('<br>') : '';
                 
-                let messageBlock = '';
-                if (r.message) {
-                    messageBlock = `<div class="req-msg"><b>Message:</b> ${escapeHtml(r.message)}</div>`;
+                // MULTI-LANG TAG PARSING
+                let translatedTags = [];
+                if (Array.isArray(otherProf.tags)) {
+                    otherProf.tags.forEach(tid => {
+                        const tagDef = allTags.find(x => x.id === tid);
+                        if(tagDef) translatedTags.push(tagDef.display[lang] || tagDef.display['en']);
+                        else translatedTags.push(tid);
+                    });
                 }
+                let tagsHtml = translatedTags.map(t => `#${t}`).join(' ');
+
+                let publicContactsHtml = Array.isArray(otherProf.public_contacts) ? otherProf.public_contacts.map(c => `• <code>${escapeHtml(c)}</code>`).join('<br>') : '';
+                let messageBlock = r.message ? `<div class="req-msg">${_i('msg')} ${escapeHtml(r.message)}</div>` : '';
                 
                 let buttonsHtml = '';
                 if (currentTab === 'received') {
                     if (r.action === 'send') {
-                        buttonsHtml = `
-                            <button class="btn btn-primary" onclick="handleActionNoModal('viewed', '${r.req_id}')">👁️ Mark as Viewed</button>
-                        `;
+                        buttonsHtml = `<button class="btn btn-primary" onclick="handleActionNoModal('viewed', '${r.req_id}')">${_i('btn_v')}</button>`;
                     } else {
                         buttonsHtml = `
-                            <button class="btn btn-secondary" onclick="openModal('${r.req_id}')">✅ Accept & Exchange</button>
-                            <button class="btn btn-danger" onclick="handleActionNoModal('decline', '${r.req_id}')">❌ Decline</button>
+                            <button class="btn btn-secondary" onclick="openModal('${r.req_id}')">${_i('btn_a')}</button>
+                            <button class="btn btn-danger" onclick="handleActionNoModal('decline', '${r.req_id}')">${_i('btn_d')}</button>
                         `;
                     }
                 } else {
-                    // SENT tab (Cancel Removed for security purposes)
-                    buttonsHtml = `<span style="font-size:12px; color:gray;">Waiting for target to respond...</span>`;
+                    buttonsHtml = `<span style="font-size:12px; color:gray;">${_i('wait')}</span>`;
                 }
 
-                let reqTypeLabel = r.action === 'send' ? 'ONE-WAY SHARE' : 'MUTUAL EXCHANGE REQUEST';
+                let reqTypeLabel = r.action === 'send' ? _i('ow_share') : _i('mut_req');
                 let reqTypeColor = r.action === 'send' ? '#2196F3' : '#FF9800';
 
-                // Safely show transferred private contacts ONLY for one-way request type.
                 let sharedContactsHtml = '';
                 if (r.action === 'send' && Array.isArray(r.shared_contacts) && r.shared_contacts.length > 0) {
                     sharedContactsHtml = `<div style="font-size:13px; margin-bottom:10px; background: rgba(33, 150, 243, 0.1); padding: 8px; border-radius: 6px;">
-                        <b>Shared Private Contacts:</b><br>
-                        ${r.shared_contacts.map(c => `• <code>${escapeHtml(c)}</code>`).join('<br>')}
+                        ${_i('shr_prv')}<br>${r.shared_contacts.map(c => `• <code>${escapeHtml(c)}</code>`).join('<br>')}
                     </div>`;
                 }
 
@@ -302,9 +343,9 @@
                         <span style="font-weight:bold; font-size:14px;">ID: ${escapeHtml(otherProf.public_uuid || '')}</span>
                         <span class="req-status" style="color:${reqTypeColor};">${reqTypeLabel}</span>
                     </div>
-                    <p class="req-bio">${otherProf.bio ? escapeHtml(otherProf.bio) : '<i>No bio set.</i>'}</p>
+                    <p class="req-bio">${otherProf.bio ? escapeHtml(otherProf.bio) : _i('bio_emp')}</p>
                     <div style="font-size:12px; color:gray; margin-bottom:10px;">${escapeHtml(tagsHtml)}</div>
-                    ${publicContactsHtml ? `<div style="font-size:13px; margin-bottom:10px;"><b>Public Contacts:</b><br>${publicContactsHtml}</div>` : ''}
+                    ${publicContactsHtml ? `<div style="font-size:13px; margin-bottom:10px;">${_i('pub_c')}<br>${publicContactsHtml}</div>` : ''}
                     ${sharedContactsHtml}
                     ${messageBlock}
                     <div style="margin-top:12px;">${buttonsHtml}</div>
@@ -319,107 +360,55 @@
             checkboxesContainer.innerHTML = '';
             
             if (!Array.isArray(myPrivateContacts) || myPrivateContacts.length === 0) {
-                checkboxesContainer.innerHTML = `
-                    <p style="color:red; font-size:13px; font-weight:bold;">
-                        ⚠️ You cannot accept this request because you have no private contacts to share in exchange. Please add at least one private contact via the Bot's 'Manage Contacts' menu first.
-                    </p>
-                `;
+                checkboxesContainer.innerHTML = `<p style="color:red; font-size:13px; font-weight:bold;">${_i('m_warn')}</p>`;
                 document.getElementById('modal-confirm-btn').classList.add('hidden');
             } else {
                 document.getElementById('modal-confirm-btn').classList.remove('hidden');
                 myPrivateContacts.forEach(c => {
                     const row = document.createElement('label');
                     row.className = 'checkbox-row';
-                    row.innerHTML = `
-                        <input type="checkbox" name="private_contact" value="${escapeHtml(c.id || '')}">
-                        <span>${escapeHtml(c.value || '')}</span>
-                    `;
+                    row.innerHTML = `<input type="checkbox" name="private_contact" value="${escapeHtml(c.id || '')}"> <span>${escapeHtml(c.value || '')}</span>`;
                     checkboxesContainer.appendChild(row);
                 });
             }
             document.getElementById('modal-overlay').classList.remove('hidden');
         }
 
-        function closeModal() {
-            document.getElementById('modal-overlay').classList.add('hidden');
-        }
+        function closeModal() { document.getElementById('modal-overlay').classList.add('hidden'); }
 
         async function submitModal() {
             const selectedBoxes = document.querySelectorAll('input[name="private_contact"]:checked');
             if (selectedBoxes.length === 0 && Array.isArray(myPrivateContacts) && myPrivateContacts.length > 0) {
-                alert("Please select at least one contact to share in the exchange.");
-                return;
+                alert(_i('al_sel')); return;
             }
-            
-            const selectedIds = Array.from(selectedBoxes).map(b => b.value);
-            
             try {
                 let res = await fetch('/api/handle_request', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        initData: tg.initData,
-                        req_id: modalReqId,
-                        action: 'accept',
-                        selected_contact_ids: selectedIds
-                    })
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ initData: tg.initData, req_id: modalReqId, action: 'accept', selected_contact_ids: Array.from(selectedBoxes).map(b => b.value) })
                 });
-                
-                if (res.ok) {
-                    closeModal();
-                    await loadRequests();
-                } else {
-                    let err = await res.json();
-                    alert(err.detail || "An error occurred.");
-                }
-            } catch (e) {
-                console.error(e);
-                alert("An error occurred. Please try again.");
-            }
+                if (res.ok) { closeModal(); await loadRequests(); } 
+                else alert(_i('err'));
+            } catch (e) { alert(_i('err')); }
         }
 
         async function handleActionNoModal(action, reqId) {
-            let msg = "";
-            if (action === 'decline') {
-                msg = "Are you sure you want to decline this request?";
-            } else if (action === 'viewed') {
-                msg = "Mark this request as viewed? It will be removed from this list.";
-            }
-            
+            let msg = action === 'decline' ? _i('al_dec') : (action === 'viewed' ? _i('al_v') : "");
             if (msg && !confirm(msg)) return;
-            
             try {
                 let res = await fetch('/api/handle_request', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        initData: tg.initData,
-                        req_id: reqId,
-                        action: action
-                    })
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ initData: tg.initData, req_id: reqId, action: action })
                 });
-                
-                if (res.ok) {
-                    await loadRequests();
-                } else {
-                    let err = await res.json();
-                    alert(err.detail || "An error occurred.");
-                }
-            } catch (e) {
-                console.error(e);
-                alert("An error occurred. Please try again.");
-            }
+                if (res.ok) await loadRequests(); 
+                else alert(_i('err'));
+            } catch (e) { alert(_i('err')); }
         }
 
-        document.getElementById('reqSearchInput').addEventListener('input', () => {
-            renderRequests();
-        });
-
+        document.getElementById('reqSearchInput').addEventListener('input', () => { renderRequests(); });
         function escapeHtml(str) {
             if (!str) return '';
             return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         }
-
         init();
     </script>
 </body>
