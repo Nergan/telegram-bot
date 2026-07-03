@@ -494,7 +494,9 @@ async def show_contact_selection(event: types.CallbackQuery | types.Message, sta
 
 @router.callback_query(F.data.startswith("selcon_"), ContactRequest.selecting_contacts)
 async def toggle_share_selection(callback: types.CallbackQuery, state: FSMContext):
-    cid = callback.data.split("_")[1]
+    # Properly extract the full Contact ID to preserve default Telegram usernames
+    cid = callback.data.replace("selcon_", "", 1)
+    
     data = await state.get_data()
     action = data.get("action")
     selected_ids = data.get("selected_contact_ids", [])
