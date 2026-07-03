@@ -35,14 +35,16 @@ class Database:
     async def get_or_create_active_profile(cls, user_id: int, username: str = None) -> dict:
         active = await cls.db.profiles.find_one({"user_id": user_id, "is_active": True})
         if active: 
-            # Update username silently if it changed
-            if username and active.get("username") != username:
-                await cls.db.profiles.update_one({"_id": active["_id"]}, {"$set": {"username": username}})
-            return active
+            if username:
+                await cls.sync_telegram_username(active, username)
+            return await cls.db.profiles.find_one({"_id": active["_id"]})
         
         any_profile = await cls.db.profiles.find_one({"user_id": user_id})
         if any_profile:
             await cls.set_active_profile(user_id, any_profile['public_uuid'])
+            active_fresh = await cls.db.profiles.find_one({"public_uuid": any_profile['public_uuid']})
+            if username:
+                await cls.sync_telegram_username(active_fresh, username)
             return await cls.db.profiles.find_one({"public_uuid": any_profile['public_uuid']})
             
         return await cls.create_profile(user_id, username)
@@ -59,10 +61,9 @@ class Database:
             "public_uuid": public_uuid,
             "tags": [],
             "filters": {"require_tags": [], "exclude_tags": [], "any_tags": []},
+            "contacts": [], # Единый массив контактов
             "text": None,
             "media": [], 
-            "public_contact": None,
-            "private_contact": None,
             "is_active": False,
             "is_hidden": False,
             "created_at": datetime.datetime.now(datetime.timezone.utc)
@@ -72,8 +73,36 @@ class Database:
 
         res = await cls.db.profiles.insert_one(profile)
         profile["_id"] = res.inserted_id
+        
+        if username:
+            await cls.sync_telegram_username(profile, username)
+            
         logger.info(f"Created new profile {public_uuid} for user {user_id}")
-        return profile
+        return await cls.db.profiles.find_one({"_id": profile["_id"]})
+
+    @classmethod
+    async def sync_telegram_username(cls, profile: dict, username: str):
+        """Гарантирует автоматическое добавление и актуализацию TG-username в контактах"""
+        if not username:
+            return
+        contacts = profile.get("contacts", [])
+        if not isinstance(contacts, list):
+            contacts = []
+            
+        tg_contact = next((c for c in contacts if c.get("id") == "tg_username"), None)
+        val = f"@{username}"
+        if not tg_contact:
+            contacts.append({
+                "id": "tg_username",
+                "type": "username",
+                "value": val,
+                "is_public": False # По умолчанию скрыт в приватных
+            })
+            await cls.db.profiles.update_one({"_id": profile["_id"]}, {"$set": {"contacts": contacts}})
+        else:
+            if tg_contact.get("value") != val:
+                tg_contact["value"] = val
+                await cls.db.profiles.update_one({"_id": profile["_id"]}, {"$set": {"contacts": contacts}})
 
     @classmethod
     async def set_active_profile(cls, user_id: int, profile_uuid: str):

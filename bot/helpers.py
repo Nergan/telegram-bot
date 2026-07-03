@@ -15,7 +15,16 @@ async def send_profile(chat_id: int, profile: dict, kb, custom_prefix: str = "")
     text = f"{custom_prefix}<b>ID:</b> <code>{profile['public_uuid']}</code>\n\n"
         
     if profile.get('text'): text += f"📝 <b>Bio:</b>\n{html.escape(profile['text'])}\n\n"
-    if profile.get('public_contact'): text += f"🌐 <b>Public Contacts:</b>\n{html.escape(profile['public_contact'])}\n\n"
+    
+    # Отображаем только публичные контакты в карточке анкеты
+    contacts = profile.get("contacts", [])
+    public_contacts = [c for c in contacts if c.get("is_public")]
+    if public_contacts:
+        text += "🌐 <b>Public Contacts:</b>\n"
+        for c in public_contacts:
+            text += f"• {html.escape(c['value'])}\n"
+        text += "\n"
+        
     if profile.get('tags'): text += f"🏷️ <b>Tags:</b> #{' #'.join(profile['tags'])}\n"
             
     media = profile.get("media", [])
