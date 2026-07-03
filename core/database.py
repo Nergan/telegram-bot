@@ -152,3 +152,15 @@ class Database:
     async def get_seen_profiles(cls, user_id: int) -> list:
         session = await cls.db.search_sessions.find_one({"user_id": user_id})
         return session.get("seen_uuids", []) if session else []
+    
+    @classmethod
+    async def get_requests_counts(cls, user_id: int) -> tuple[int, int]:
+        sent = await cls.db.contact_requests.count_documents({
+            "initiator_id": user_id, 
+            "status": {"$in": ["pending", "counter_pending"]}
+        })
+        recv = await cls.db.contact_requests.count_documents({
+            "target_id": user_id, 
+            "status": {"$in": ["pending", "counter_pending"]}
+        })
+        return sent, recv

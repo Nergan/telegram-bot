@@ -20,8 +20,9 @@ async def show_main_menu(message: types.Message, state: FSMContext):
     await state.clear()
     logger.info(f"User {message.from_user.id} accessed main menu.")
     active_profile = await Database.get_or_create_active_profile(message.from_user.id, message.from_user.username)
+    sent_c, recv_c = await Database.get_requests_counts(message.from_user.id)
     await message.answer("🏠 View Active Profile 🏠", reply_markup=main_menu_kb())
-    await send_profile(message.chat.id, active_profile, profile_inline_kb(active_profile['public_uuid']))
+    await send_profile(message.chat.id, active_profile, profile_inline_kb(active_profile['public_uuid'], sent_c, recv_c))
 
 # --- FSM CAPTURE ---
 
@@ -315,7 +316,8 @@ async def manage_prof_cb(callback: types.CallbackQuery, state: FSMContext):
     is_active = profile.get('is_active', False)
     await callback.message.answer("⚙️ Managing Profile...", reply_markup=manage_action_kb(is_active))
     
-    await send_profile(callback.from_user.id, profile, profile_inline_kb(prof_uuid))
+    sent_c, recv_c = await Database.get_requests_counts(callback.from_user.id)
+    await send_profile(callback.from_user.id, profile, profile_inline_kb(prof_uuid, sent_c, recv_c))
     await callback.answer()
 
 @router.message(F.text.in_({"🌟 Set Active", "🔄 Regen ID", "🗑️ Delete"}))
@@ -339,7 +341,8 @@ async def manage_actions(message: types.Message, state: FSMContext):
         p = await Database.get_profile_by_uuid(new_uuid)
         
         await message.answer("🔄 ID Regenerated!", reply_markup=manage_action_kb(p.get('is_active', False)))
-        await send_profile(message.chat.id, p, profile_inline_kb(new_uuid))
+        sent_c, recv_c = await Database.get_requests_counts(message.from_user.id)
+        await send_profile(message.chat.id, p, profile_inline_kb(new_uuid, sent_c, recv_c))
     elif message.text == "🗑️ Delete":
         success = await Database.delete_profile(user_id, prof_uuid)
         if success:
@@ -561,10 +564,14 @@ async def confirm_share_contacts_cb(callback: types.CallbackQuery, state: FSMCon
         b_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in req['counter_shared_contacts'])
         a_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
         
+        b_profile = await Database.get_active_profile(req['target_id'])
+        await send_profile(callback.from_user.id, b_profile, kb=None, custom_prefix="👤 <b>Exchanged Profile:</b>\n\n")
         await callback.message.answer(
             f"🤝 <b>Mutual Exchange Complete!</b>\nHere are the contact details they shared with you:\n\n{b_contacts_text}"
         )
         
+        a_profile = await Database.get_active_profile(callback.from_user.id)
+        await send_profile(req['target_id'], a_profile, kb=None, custom_prefix="👤 <b>Exchanged Profile:</b>\n\n")
         await bot.send_message(
             req['target_id'], 
             f"🤝 <b>Mutual Exchange Complete!</b>\nHere are the contact details they shared with you:\n\n{a_contacts_text}"
@@ -589,6 +596,8 @@ async def confirm_share_contacts_cb(callback: types.CallbackQuery, state: FSMCon
         
         contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
         
+        b_profile = await Database.get_active_profile(callback.from_user.id)
+        await send_profile(req['initiator_id'], b_profile, kb=None, custom_prefix="👤 <b>Exchanged Profile:</b>\n\n")
         await bot.send_message(
             req['initiator_id'], 
             f"✅ <b>Request Accepted!</b>\nThe user shared their contact details:\n\n{contacts_text}"
@@ -596,6 +605,8 @@ async def confirm_share_contacts_cb(callback: types.CallbackQuery, state: FSMCon
         
         initiator_shared = req.get("shared_contacts", [])
         if initiator_shared:
+            a_profile = await Database.get_active_profile(req['initiator_id'])
+            await send_profile(callback.from_user.id, a_profile, kb=None, custom_prefix="👤 <b>Exchanged Profile:</b>\n\n")
             init_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in initiator_shared)
             await callback.message.answer(
                 f"🤝 <b>You shared your contact details.</b>\nHere are the contact details they shared with you:\n\n{init_contacts_text}"

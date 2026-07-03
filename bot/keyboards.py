@@ -52,11 +52,14 @@ def profiles_menu_kb() -> ReplyKeyboardMarkup:
 
 # --- INLINE KEYBOARDS ---
 
-def profile_inline_kb(profile_uuid: str) -> InlineKeyboardMarkup:
+def profile_inline_kb(profile_uuid: str, sent_count: int = 0, recv_count: int = 0) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🏷️ Tags", web_app=WebAppInfo(url=f"{WEBHOOK_URL}/webapp?mode=edit&profile_id={profile_uuid}")),
             InlineKeyboardButton(text="🎛️ Filters", web_app=WebAppInfo(url=f"{WEBHOOK_URL}/webapp?mode=filter&profile_id={profile_uuid}"))
+        ],
+        [
+            InlineKeyboardButton(text=f"📥 Requests (S: {sent_count} | R: {recv_count})", web_app=WebAppInfo(url=f"{WEBHOOK_URL}/webapp?mode=requests&profile_id={profile_uuid}"))
         ]
     ])
 

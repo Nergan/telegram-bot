@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tags</title>
+    <title>Requests & Tags Hub</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body { font-family: sans-serif; background-color: var(--tg-theme-bg-color, #ffffff); color: var(--tg-theme-text-color, #000000); padding: 15px; margin: 0; }
@@ -17,23 +17,71 @@
         .hidden { display: none !important; }
         h4 { margin-top: 0; margin-bottom: 10px; }
         #error-msg { font-size: 13px; margin-bottom: 10px; font-weight: bold; }
+
+        /* Requests Styles */
+        .tabs { display: flex; border-bottom: 2px solid var(--tg-theme-secondary-bg-color, rgba(0,0,0,0.05)); margin-bottom: 15px; }
+        .tab-btn { flex: 1; padding: 12px; text-align: center; cursor: pointer; border-bottom: 3px solid transparent; font-weight: bold; background: none; border: none; color: var(--tg-theme-hint-color, #888888); font-size: 14px; }
+        .tab-btn.active { border-bottom-color: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-text-color, #000); }
+        .req-card { border: 1px solid var(--tg-theme-secondary-bg-color, rgba(0,0,0,0.05)); border-radius: 12px; padding: 15px; margin-bottom: 15px; background: rgba(0,0,0,0.02); }
+        .req-status { font-weight: bold; margin-bottom: 8px; font-size: 13px; text-transform: uppercase; }
+        .req-bio { font-style: italic; margin-bottom: 10px; color: var(--tg-theme-text-color); }
+        .req-msg { background: rgba(0,0,0,0.04); padding: 8px; border-radius: 6px; margin-bottom: 10px; font-size: 13px; }
+        .btn { display: inline-block; padding: 8px 16px; border-radius: 8px; border: none; font-size: 13px; cursor: pointer; font-weight: bold; margin-right: 5px; margin-top: 5px; }
+        .btn-primary { background-color: var(--tg-theme-button-color, #2481cc); color: white; }
+        .btn-secondary { background-color: #4CAF50; color: white; }
+        .btn-danger { background-color: #F44336; color: white; }
+        .btn-warning { background-color: #FF9800; color: white; }
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .modal-content { background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #000); padding: 20px; border-radius: 12px; width: 90%; max-width: 400px; box-sizing: border-box; }
+        .checkbox-row { display: flex; align-items: center; margin-bottom: 10px; cursor: pointer; }
+        .checkbox-row input { width: auto; margin-right: 10px; margin-bottom: 0; }
     </style>
 </head>
 <body>
-    <h3 id="title">Tags Interface</h3>
-    <p id="legend" style="font-size: 12px; color: gray;"></p>
-    <p id="error-msg"></p>
-    
-    <div class="section" id="sel-section">
-        <h4>Selected / Active</h4>
-        <div id="selected-container"></div>
+    <div id="tags-section">
+        <h3 id="title">Tags Interface</h3>
+        <p id="legend" style="font-size: 12px; color: gray;"></p>
+        <p id="error-msg"></p>
+        
+        <div class="section" id="sel-section">
+            <h4>Selected / Active</h4>
+            <div id="selected-container"></div>
+        </div>
+
+        <input type="text" id="searchInput" placeholder="Search available tags...">
+        
+        <div class="section">
+            <h4>Available</h4>
+            <div id="available-container"></div>
+        </div>
     </div>
 
-    <input type="text" id="searchInput" placeholder="Search available tags...">
-    
-    <div class="section">
-        <h4>Available</h4>
-        <div id="available-container"></div>
+    <!-- REQUESTS HUB SECTION -->
+    <div id="requests-section" class="hidden">
+        <h3 id="req-title">Contact Requests Hub</h3>
+        <p id="req-legend" style="font-size: 12px; color: gray; margin-bottom: 15px;">Manage sent and received requests.</p>
+        
+        <div class="tabs">
+            <button class="tab-btn active" id="tab-received" onclick="switchTab('received')">📥 Received</button>
+            <button class="tab-btn" id="tab-sent" onclick="switchTab('sent')">📤 Sent</button>
+        </div>
+
+        <input type="text" id="reqSearchInput" placeholder="Search across tags, bio, contacts, ID...">
+        
+        <div id="requests-list"></div>
+    </div>
+
+    <!-- MODAL OVERLAY -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h4 id="modal-title">Select Contacts to Share</h4>
+            <p id="modal-desc" style="font-size: 12px; color: gray; margin-bottom: 15px;">Choose which private contacts to share:</p>
+            <div id="checkboxes-container"></div>
+            <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
+                <button class="btn btn-primary" id="modal-confirm-btn" onclick="submitModal()">Confirm</button>
+                <button class="btn btn-danger" onclick="closeModal()">Cancel</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -45,15 +93,30 @@
         let allTags = {{AVAILABLE_TAGS_JSON}}; 
         let stateMap = {};
 
+        // Requests variables
+        let sentRequests = [];
+        let receivedRequests = [];
+        let myPrivateContacts = [];
+        let currentTab = 'received';
+        let modalAction = '';
+        let modalReqId = '';
+
         if(mode === 'edit') {
             document.getElementById('title').innerText = 'Edit Profile Tags';
             document.getElementById('legend').innerText = 'Tap to select.';
-        } else {
+        } else if (mode === 'filter') {
             document.getElementById('title').innerText = 'Advanced Filter';
             document.getElementById('legend').innerHTML = 'Tap to cycle: 🟩 Must have | 🟥 Exclude | 🟦 Any';
         }
 
         async function init() {
+            if (mode === 'requests') {
+                document.getElementById('tags-section').classList.add('hidden');
+                document.getElementById('requests-section').classList.remove('hidden');
+                await loadRequests();
+                return;
+            }
+
             allTags.forEach(t => stateMap[t.id] = 0);
             try {
                 let pRes = await fetch('/api/get_profile_data', { 
@@ -80,6 +143,8 @@
             }
             renderTags();
         }
+
+        // --- TAGS RENDERING ---
 
         function renderTags() {
             const selCont = document.getElementById('selected-container');
@@ -119,6 +184,7 @@
         });
 
         tg.MainButton.onClick(async () => {
+            if (mode === 'requests') return;
             let pay = { initData: tg.initData, mode: mode, profile_id: profile_id };
             if(mode === 'edit') pay.tags = Object.keys(stateMap).filter(k => stateMap[k] === 1);
             else {
@@ -129,6 +195,246 @@
             await fetch('/api/update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(pay) });
             tg.close();
         });
+
+        // --- REQUESTS LOGIC ---
+
+        async function loadRequests() {
+            try {
+                let res = await fetch('/api/get_requests', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ initData: tg.initData })
+                });
+                if (res.ok) {
+                    let data = await res.json();
+                    sentRequests = data.sent_requests || [];
+                    receivedRequests = data.received_requests || [];
+                    myPrivateContacts = data.my_private_contacts || [];
+                    renderRequests();
+                } else {
+                    document.getElementById('requests-list').innerHTML = "<p style='color:red;'>Failed to load requests.</p>";
+                }
+            } catch (e) {
+                console.error(e);
+                document.getElementById('requests-list').innerHTML = "<p style='color:red;'>An error occurred.</p>";
+            }
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.getElementById('tab-received').classList.toggle('active', tab === 'received');
+            document.getElementById('tab-sent').classList.toggle('active', tab === 'sent');
+            renderRequests();
+        }
+
+        function renderRequests() {
+            const listContainer = document.getElementById('requests-list');
+            listContainer.innerHTML = '';
+            
+            const q = document.getElementById('reqSearchInput').value.toLowerCase();
+            const list = currentTab === 'received' ? receivedRequests : sentRequests;
+            
+            const filtered = list.filter(r => {
+                const bio = r.other_profile.bio.toLowerCase();
+                const tags = r.other_profile.tags.map(t => `#${t}`).join(' ').toLowerCase();
+                const pUuid = r.other_profile.public_uuid.toLowerCase();
+                const publicCon = r.other_profile.public_contacts.join(' ').toLowerCase();
+                const disclosedCon = (r.disclosed_contacts || []).join(' ').toLowerCase();
+                const msg = r.message.toLowerCase();
+                
+                return bio.includes(q) || tags.includes(q) || pUuid.includes(q) || publicCon.includes(q) || disclosedCon.includes(q) || msg.includes(q);
+            });
+            
+            if (filtered.length === 0) {
+                listContainer.innerHTML = `<p style="text-align:center; color:gray; margin-top:20px;">No requests found.</p>`;
+                return;
+            }
+            
+            filtered.forEach(r => {
+                const card = document.createElement('div');
+                card.className = 'req-card';
+                
+                let statusLabel = r.status.toUpperCase();
+                let statusColor = 'var(--tg-theme-text-color)';
+                if (r.status === 'pending') { statusColor = '#FF9800'; statusLabel = 'Pending'; }
+                else if (r.status === 'counter_pending') { statusColor = '#2196F3'; statusLabel = 'Mutual Exchange Offered'; }
+                else if (r.status === 'accepted') { statusColor = '#4CAF50'; statusLabel = 'Exchanged / Accepted'; }
+                else if (r.status === 'declined') { statusColor = '#F44336'; statusLabel = 'Declined'; }
+                
+                let tagsHtml = r.other_profile.tags.map(t => `#${t}`).join(' ');
+                let publicContactsHtml = r.other_profile.public_contacts.map(c => `• <code>${escapeHtml(c)}</code>`).join('<br>');
+                
+                let messageBlock = '';
+                if (r.message) {
+                    messageBlock = `<div class="req-msg"><b>Message:</b> ${escapeHtml(r.message)}</div>`;
+                }
+                
+                let disclosedBlock = '';
+                if (r.status === 'accepted' && r.disclosed_contacts && r.disclosed_contacts.length > 0) {
+                    let disclosedList = r.disclosed_contacts.map(c => `• <code>${escapeHtml(c)}</code>`).join('<br>');
+                    disclosedBlock = `
+                        <div style="background: rgba(76, 175, 80, 0.1); border-left: 4px solid #4CAF50; padding: 10px; border-radius: 6px; margin-top: 10px;">
+                            <b style="color:#4CAF50;">🔑 Exchanged Contacts:</b><br>${disclosedList}
+                        </div>
+                    `;
+                }
+                
+                let buttonsHtml = '';
+                if (currentTab === 'received') {
+                    if (r.status === 'pending') {
+                        buttonsHtml = `
+                            <button class="btn btn-secondary" onclick="openModal('accept', '${r.req_id}')">✅ Share Contact</button>
+                            <button class="btn btn-warning" onclick="openModal('counter', '${r.req_id}')">🔄 Ask For Theirs</button>
+                            <button class="btn btn-danger" onclick="handleActionNoModal('decline', '${r.req_id}')">❌ Decline</button>
+                        `;
+                    } else if (r.status === 'counter_pending') {
+                        buttonsHtml = `<p style="font-size:12px; color:gray; font-style:italic;">Awaiting response to your counter-request...</p>`;
+                    }
+                } else {
+                    if (r.status === 'pending') {
+                        buttonsHtml = `
+                            <button class="btn btn-danger" onclick="handleActionNoModal('cancel', '${r.req_id}')">❌ Cancel Request</button>
+                        `;
+                    } else if (r.status === 'counter_pending') {
+                        buttonsHtml = `
+                            <button class="btn btn-secondary" onclick="openModal('agree_exchange', '${r.req_id}')">✅ Agree & Exchange</button>
+                            <button class="btn btn-danger" onclick="handleActionNoModal('decline', '${r.req_id}')">❌ Decline</button>
+                        `;
+                    }
+                }
+                
+                card.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <span style="font-weight:bold; font-size:14px;">ID: ${r.other_profile.public_uuid}</span>
+                        <span class="req-status" style="color:${statusColor}">${statusLabel}</span>
+                    </div>
+                    <p class="req-bio">${r.other_profile.bio ? escapeHtml(r.other_profile.bio) : '<i>No bio set.</i>'}</p>
+                    <div style="font-size:12px; color:gray; margin-bottom:10px;">${tagsHtml}</div>
+                    ${publicContactsHtml ? `<div style="font-size:13px; margin-bottom:10px;"><b>Public Contacts:</b><br>${publicContactsHtml}</div>` : ''}
+                    ${messageBlock}
+                    ${disclosedBlock}
+                    <div style="margin-top:12px;">${buttonsHtml}</div>
+                `;
+                listContainer.appendChild(card);
+            });
+        }
+
+        function openModal(action, reqId) {
+            modalAction = action;
+            modalReqId = reqId;
+            
+            const checkboxesContainer = document.getElementById('checkboxes-container');
+            checkboxesContainer.innerHTML = '';
+            
+            if (myPrivateContacts.length === 0) {
+                checkboxesContainer.innerHTML = `
+                    <p style="color:red; font-size:13px; font-weight:bold;">
+                        ⚠️ You have no private contacts to share. Please add at least one private contact in the bot's 'Manage Contacts' section first!
+                    </p>
+                `;
+                document.getElementById('modal-confirm-btn').classList.add('hidden');
+            } else {
+                document.getElementById('modal-confirm-btn').classList.remove('hidden');
+                
+                if (action === 'accept') {
+                    document.getElementById('modal-title').innerText = "Share Private Contacts";
+                    document.getElementById('modal-desc').innerText = "Choose which private contacts to share to accept this request:";
+                } else if (action === 'counter') {
+                    document.getElementById('modal-title').innerText = "Counter with Your Contacts";
+                    document.getElementById('modal-desc').innerText = "Choose which private contacts you're offering to exchange:";
+                } else if (action === 'agree_exchange') {
+                    document.getElementById('modal-title').innerText = "Agree & Exchange Contacts";
+                    document.getElementById('modal-desc').innerText = "Choose which private contacts you will share to complete the exchange:";
+                }
+                
+                myPrivateContacts.forEach(c => {
+                    const row = document.createElement('label');
+                    row.className = 'checkbox-row';
+                    row.innerHTML = `
+                        <input type="checkbox" name="private_contact" value="${c.id}">
+                        <span>${escapeHtml(c.value)}</span>
+                    `;
+                    checkboxesContainer.appendChild(row);
+                });
+            }
+            
+            document.getElementById('modal-overlay').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('modal-overlay').classList.add('hidden');
+        }
+
+        async function submitModal() {
+            const selectedBoxes = document.querySelectorAll('input[name="private_contact"]:checked');
+            if (selectedBoxes.length === 0 && myPrivateContacts.length > 0) {
+                alert("Please select at least one contact to share.");
+                return;
+            }
+            
+            const selectedIds = Array.from(selectedBoxes).map(b => b.value);
+            
+            try {
+                let res = await fetch('/api/handle_request', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        initData: tg.initData,
+                        req_id: modalReqId,
+                        action: modalAction,
+                        selected_contact_ids: selectedIds
+                    })
+                });
+                
+                if (res.ok) {
+                    closeModal();
+                    await loadRequests();
+                } else {
+                    let err = await res.json();
+                    alert(err.detail || "An error occurred.");
+                }
+            } catch (e) {
+                console.error(e);
+                alert("An error occurred. Please try again.");
+            }
+        }
+
+        async function handleActionNoModal(action, reqId) {
+            let msg = action === 'cancel' ? "Are you sure you want to cancel this request?" : "Are you sure you want to decline this request?";
+            if (!confirm(msg)) return;
+            
+            try {
+                let res = await fetch('/api/handle_request', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        initData: tg.initData,
+                        req_id: reqId,
+                        action: action
+                    })
+                });
+                
+                if (res.ok) {
+                    await loadRequests();
+                } else {
+                    let err = await res.json();
+                    alert(err.detail || "An error occurred.");
+                }
+            } catch (e) {
+                console.error(e);
+                alert("An error occurred. Please try again.");
+            }
+        }
+
+        document.getElementById('reqSearchInput').addEventListener('input', () => {
+            renderRequests();
+        });
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+
         init();
     </script>
 </body>
