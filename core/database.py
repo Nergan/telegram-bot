@@ -32,6 +32,15 @@ class Database:
         })
 
     @classmethod
+    async def set_user_lang(cls, user_id: int, lang: str):
+        await cls.db.user_settings.update_one({"user_id": user_id}, {"$set": {"lang": lang}}, upsert=True)
+
+    @classmethod
+    async def get_user_lang(cls, user_id: int) -> str:
+        settings = await cls.db.user_settings.find_one({"user_id": user_id})
+        return settings.get("lang", "en") if settings else "en"
+
+    @classmethod
     async def get_or_create_active_profile(cls, user_id: int, username: str = None) -> dict:
         active = await cls.db.profiles.find_one({"user_id": user_id, "is_active": True})
         if active: 
@@ -135,7 +144,6 @@ class Database:
     async def get_pool_size(cls, user_id: int) -> int:
         return await cls.db.profiles.count_documents({"user_id": {"$ne": user_id}, "is_active": True})
         
-    # --- Session Tracking ---
     @classmethod
     async def add_seen_profile(cls, user_id: int, seen_uuid: str):
         await cls.db.search_sessions.update_one(
@@ -167,15 +175,4 @@ class Database:
             "target_id": user_id, 
             "status": "pending"
         })
-        logger.info(f"Pending requests count for {user_id}: sent={sent}, recv={recv}")
         return sent, recv
-    
-    # Add these methods under Session Tracking
-    @classmethod
-    async def set_user_lang(cls, user_id: int, lang: str):
-        await cls.db.user_settings.update_one({"user_id": user_id}, {"$set": {"lang": lang}}, upsert=True)
-
-    @classmethod
-    async def get_user_lang(cls, user_id: int) -> str:
-        settings = await cls.db.user_settings.find_one({"user_id": user_id})
-        return settings.get("lang", "en") if settings else "en"

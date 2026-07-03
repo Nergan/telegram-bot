@@ -24,11 +24,14 @@ async def switch_language(message: types.Message, state: FSMContext, lang: str):
 @router.message(F.text.in_(_btn("btn_view_active")))
 async def show_main_menu(message: types.Message, state: FSMContext, lang: str):
     await state.clear()
+    logger.info(f"User {message.from_user.id} accessed main menu.")
     
-    if message.text and message.text.startswith(("/start", "/help", "/hello")):
+    is_help_command = message.text and message.text.startswith(("/start", "/help", "/hello"))
+    if is_help_command:
         await message.answer(_("help_cmd", lang))
         
     active_profile = await Database.get_or_create_active_profile(message.from_user.id, message.from_user.username)
+    
     pool_size = await Database.get_pool_size(message.from_user.id)
     sent_c, recv_c = await Database.get_requests_counts(message.from_user.id)
     
@@ -44,12 +47,17 @@ async def fsm_cancel(message: types.Message, state: FSMContext, lang: str):
 @router.message(StateFilter("*"), F.text.in_(_btn("btn_clear")))
 async def fsm_clear(message: types.Message, state: FSMContext, lang: str):
     curr_state = await state.get_state()
-    field_map = {ProfileSetup.waiting_for_bio: "text", ProfileSetup.waiting_for_contact_val: "contacts", ProfileSetup.waiting_for_media: "media"}
+    field_map = {
+        ProfileSetup.waiting_for_bio: "text",
+        ProfileSetup.waiting_for_contact_val: "contacts",
+        ProfileSetup.waiting_for_media: "media"
+    }
     field = field_map.get(curr_state)
     if field:
         active_prof = await Database.get_active_profile(message.from_user.id)
         val = [] if field in ["media", "contacts"] else None
         await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {field: val}})
+        logger.info(f"User {message.from_user.id} cleared {field}.")
     await state.clear()
     from bot.handlers.profile import edit_info_menu
     await edit_info_menu(message, lang)
@@ -58,11 +66,11 @@ async def fsm_clear(message: types.Message, state: FSMContext, lang: str):
 async def unhandled_message(message: types.Message, state: FSMContext, lang: str):
     curr_state = await state.get_state()
     if curr_state:
-        await message.answer("❌ FSM Error / Press Cancel.")
+        await message.answer(_("err_fsm", lang))
     else:
         active = await Database.get_active_profile(message.from_user.id)
         if active:
             pool_size = await Database.get_pool_size(message.from_user.id)
-            await message.answer("🤷‍♂️", reply_markup=main_menu_kb(lang, pool_size))
+            await message.answer(_("err_unknown", lang), reply_markup=main_menu_kb(lang, pool_size))
         else:
-            await message.answer("🤷 /start")
+            await message.answer(_("err_start", lang))
