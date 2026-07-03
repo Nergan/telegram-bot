@@ -243,7 +243,11 @@
                 const publicCon = Array.isArray(otherProf.public_contacts) ? otherProf.public_contacts.join(' ').toLowerCase() : '';
                 const msg = (r.message || '').toLowerCase();
                 
-                return bio.includes(q) || tags.includes(q) || pUuid.includes(q) || publicCon.includes(q) || msg.includes(q);
+                // Extra search fields
+                const sharedCon = Array.isArray(r.shared_contacts) ? r.shared_contacts.join(' ').toLowerCase() : '';
+                const reqTypeLabel = (r.action === 'send' ? 'one-way share' : 'mutual exchange request').toLowerCase();
+                
+                return bio.includes(q) || tags.includes(q) || pUuid.includes(q) || publicCon.includes(q) || msg.includes(q) || sharedCon.includes(q) || reqTypeLabel.includes(q);
             });
             
             if (filtered.length === 0) {

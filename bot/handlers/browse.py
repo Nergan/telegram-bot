@@ -59,13 +59,38 @@ async def browse_next(message: types.Message, state: FSMContext):
     
     await message.answer("🔍 Browsing...", reply_markup=browse_kb())
     
+    # Check for pending requests specifically for these inline buttons
+    pending_cursor = Database.db.contact_requests.find({
+        "initiator_id": user_id,
+        "target_id": target['user_id'],
+        "status": "pending"
+    })
+    pending_docs = await pending_cursor.to_list(length=10)
+    pending_actions = [doc.get("action") for doc in pending_docs]
+    
     private_contacts = [c for c in active.get("contacts", []) if not c.get("is_public")]
     has_self_private = len(private_contacts) > 0
     
     target_private_contacts = [c for c in target.get("contacts", []) if not c.get("is_public")]
     has_target_private = len(target_private_contacts) > 0
     
-    await send_profile(message.chat.id, target, browse_inline_kb(target['public_uuid'], has_self_private=has_self_private, has_target_private=has_target_private))
+    await send_profile(
+        message.chat.id, 
+        target, 
+        browse_inline_kb(
+            target['public_uuid'], 
+            has_self_private=has_self_private, 
+            has_target_private=has_target_private,
+            pending_actions=pending_actions
+        )
+    )
+
+@router.callback_query(F.data == "pending_alert")
+async def pending_alert_cb(callback: types.CallbackQuery):
+    await callback.answer(
+        "⏳ You already have a pending request of this type with this user.",
+        show_alert=True
+    )
 
 @router.callback_query(F.data == "no_private_alert")
 async def no_private_alert_cb(callback: types.CallbackQuery):
@@ -305,7 +330,6 @@ async def execute_contact_request(user_id: int, state: FSMContext, message=None)
             prefix += "🤝 <b>They also shared private contacts with you!</b>\n"
             
         prefix += "Open '📥 Requests' from your active profile to view details.\n\n"
-        # Only sending the concise notification for One-Way to minimize chat spam
         await send_profile(target_prof['user_id'], initiator, kb=None, custom_prefix=prefix)
     
     else:
