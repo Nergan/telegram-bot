@@ -358,7 +358,7 @@ async def manage_actions(message: types.Message, state: FSMContext):
 
 # --- BROWSING & CONTACT REQUESTS ---
 
-@router.message(F.text.in_({"🔍 Browse", "⏩ Next Profile"}))
+@router.message(F.text.startswith("🔍 Browse") | (F.text == "⏩ Next Profile"))
 async def browse_next(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     active = await Database.get_active_profile(user_id)
@@ -393,7 +393,6 @@ async def browse_next(message: types.Message, state: FSMContext):
     target = profiles[0]
     await Database.add_seen_profile(user_id, target['public_uuid'])
     
-    pool_size = await Database.get_pool_size(user_id)
     await message.answer("🔍 Browsing...", reply_markup=browse_kb())
     
     private_contacts = [c for c in active.get("contacts", []) if not c.get("is_public")]
@@ -557,6 +556,8 @@ async def confirm_share_contacts_cb(callback: types.CallbackQuery, state: FSMCon
         
         initiator_shared = req.get("shared_contacts", [])
         if initiator_shared:
+            a_profile = await Database.get_active_profile(req['initiator_id'])
+            await send_profile(callback.from_user.id, a_profile, kb=None, custom_prefix="👤 <b>Exchanged Profile:</b>\n\n")
             init_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in initiator_shared)
             await callback.message.answer(
                 f"🤝 <b>Mutual Exchange Complete!</b>\nHere are the contact details of the user you accepted:\n\n{init_contacts_text}"
