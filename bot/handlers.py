@@ -23,6 +23,15 @@ async def show_main_menu(message: types.Message, state: FSMContext):
     await message.answer("🏠 View Active Profile 🏠", reply_markup=main_menu_kb())
     await send_profile(message.chat.id, active_profile, profile_inline_kb(active_profile['public_uuid']))
 
+@router.callback_query(F.data.in_({"my_profile", "my_profiles"}))
+async def show_main_menu_callback(callback: types.CallbackQuery, state: FSMContext):
+    """Обработчик старых инлайновых кнопок 'My Profile' из истории переписки"""
+    await state.clear()
+    active_profile = await Database.get_or_create_active_profile(callback.from_user.id, callback.from_user.username)
+    await callback.message.answer("🏠 View Active Profile 🏠", reply_markup=main_menu_kb())
+    await send_profile(callback.from_user.id, active_profile, profile_inline_kb(active_profile['public_uuid']))
+    await callback.answer()
+
 @router.message(F.text == "🔒 View Private Contacts")
 async def view_private_contacts(message: types.Message):
     active_prof = await Database.get_active_profile(message.from_user.id)
@@ -102,7 +111,6 @@ async def capture_new_contact(message: types.Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("togglecon_"))
 async def toggle_contact_visibility(callback: types.CallbackQuery):
-    # Безопасное извлечение ID контакта, поддерживающее символы подчеркивания (tg_username)
     cid = callback.data.replace("togglecon_", "", 1)
     active_prof = await Database.get_active_profile(callback.from_user.id)
     
@@ -131,7 +139,6 @@ async def toggle_contact_visibility(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("delcon_"))
 async def delete_contact(callback: types.CallbackQuery):
-    # Безопасное извлечение ID
     cid = callback.data.replace("delcon_", "", 1)
     if cid == "tg_username":
         return await callback.answer("❌ You cannot delete your Telegram username contact.", show_alert=True)
@@ -243,7 +250,11 @@ async def capture_media(message: types.Message, state: FSMContext):
 # --- PROFILES MANAGEMENT ---
 
 @router.message(F.text == "👥 Profiles")
-async def profiles_menu(message: types.Message):
+async def profiles_menu(message: types.Message, state: FSMContext = None):
+    # Сбрасываем возможные FSM-состояния при переходе в список профилей
+    if state:
+        await state.clear()
+        
     cursor = Database.db.profiles.find({"user_id": message.from_user.id})
     profiles = await cursor.to_list(length=100)
     count = len(profiles)
@@ -252,7 +263,17 @@ async def profiles_menu(message: types.Message):
     for p in profiles:
         status = "🌟 Active" if p.get("is_active") else "⚪ Inactive"
         if p.get("is_hidden"): status += " 👻 Hidden"
-        inline_kb.append([InlineKeyboardButton(text=f"{p['public_uuid']} [{status}]", callback_data=f"manage_prof_{p['public_uuid']}")])
+        
+        # Добавляем до 12 символов из био перед ID, если оно заполнено
+        bio = p.get("text", "") or ""
+        bio_clean = bio.strip().replace("\n", " ")
+        if bio_clean:
+            bio_snippet = bio_clean[:12] + "..." if len(bio_clean) > 12 else bio_clean
+            label = f"📝 {bio_snippet} | ID: {p['public_uuid']} [{status}]"
+        else:
+            label = f"ID: {p['public_uuid']} [{status}]"
+            
+        inline_kb.append([InlineKeyboardButton(text=label, callback_data=f"manage_prof_{p['public_uuid']}")])
         
     await message.answer("👥 Profiles", reply_markup=profiles_menu_kb())
     if inline_kb:
@@ -274,6 +295,53 @@ async def del_all_but_active(message: types.Message):
     await Database.delete_all_but_active(message.from_user.id)
     await message.answer("✅ All inactive profiles deleted.")
     await profiles_menu(message)
+
+@router.callback_query(F.data.startswith("manage_prof_"))
+async def manage_prof_cb(callback: types.CallbackQuery, state: FSMContext):
+    # Безопасное снятие FSM-блокировок при переходе в профиль
+    await state.clear()
+    
+    prof_uuid = callback.data.split("_")[2]
+    profile = await Database.get_profile_by_uuid(prof_uuid)
+    if not profile or profile['user_id'] != callback.from_user.id:
+        return await callback.answer("❌ Profile not found.", show_alert=True)
+    
+    await state.update_data(managing_uuid=prof_uuid)
+    await callback.message.delete()
+    await send_profile(callback.from_user.id, profile, manage_action_kb())
+    await callback.answer()
+
+@router.message(F.text.in_({"🌟 Set Active", "👁️ Toggle Vis", "🔄 Regen ID", "🗑️ Delete"}))
+async def manage_actions(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    prof_uuid = data.get("managing_uuid")
+    if not prof_uuid: return await show_main_menu(message, state)
+    
+    user_id = message.from_user.id
+    p = await Database.get_profile_by_uuid(prof_uuid)
+    if not p: return await show_main_menu(message, state)
+
+    if message.text == "🌟 Set Active":
+        await Database.set_active_profile(user_id, prof_uuid)
+        await message.answer("🌟 Profile Activated!")
+        await show_main_menu(message, state)
+    elif message.text == "👁️ Toggle Vis":
+        await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"is_hidden": not p.get('is_hidden', False)}})
+        await message.answer("👁️ Visibility toggled.")
+        await profiles_menu(message)
+    elif message.text == "🔄 Regen ID":
+        new_uuid = uuid.uuid4().hex[:8]
+        await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"public_uuid": new_uuid}})
+        await state.update_data(managing_uuid=new_uuid)
+        p = await Database.get_profile_by_uuid(new_uuid)
+        await send_profile(message.chat.id, p, manage_action_kb())
+    elif message.text == "🗑️ Delete":
+        success = await Database.delete_profile(user_id, prof_uuid)
+        if success:
+            await message.answer("🗑️ Profile Deleted.")
+            await profiles_menu(message)
+        else:
+            await message.answer("❌ Cannot delete your only profile.")
 
 # --- BROWSING & CONTACT REQUESTS ---
 
