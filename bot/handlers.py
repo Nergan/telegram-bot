@@ -394,15 +394,25 @@ async def browse_next(message: types.Message, state: FSMContext):
     await message.answer("🔍 Browsing...", reply_markup=browse_kb())
     
     private_contacts = [c for c in active.get("contacts", []) if not c.get("is_public")]
-    has_private = len(private_contacts) > 0
+    has_self_private = len(private_contacts) > 0
     
-    await send_profile(message.chat.id, target, browse_inline_kb(target['public_uuid'], has_private=has_private))
+    target_private_contacts = [c for c in target.get("contacts", []) if not c.get("is_public")]
+    has_target_private = len(target_private_contacts) > 0
+    
+    await send_profile(message.chat.id, target, browse_inline_kb(target['public_uuid'], has_self_private=has_self_private, has_target_private=has_target_private))
 
 @router.callback_query(F.data == "no_private_alert")
 async def no_private_alert_cb(callback: types.CallbackQuery):
     await callback.answer(
         "⚠️ You have no private contacts to share!\n"
         "Please add a private contact under '📝 Edit Active Profile' -> '📞 Manage Contacts' first.",
+        show_alert=True
+    )
+
+@router.callback_query(F.data == "target_no_private_alert")
+async def target_no_private_alert_cb(callback: types.CallbackQuery):
+    await callback.answer(
+        "⚠️ You cannot send an exchange request to this user because they have no private contacts to share in return.",
         show_alert=True
     )
 
@@ -688,8 +698,7 @@ async def execute_contact_request(user_id: int, state: FSMContext, message=None)
     prefix = f"🔔 <b>NEW CONTACT REQUEST!</b>\n"
     if msg_text: prefix += f"💬 <b>Message:</b> {html.escape(msg_text)}\n\n"
     if data['action'] == "send":
-        contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
-        prefix = f"🤝 <b>A USER SHARED THEIR CONTACT!</b>\nShared details:\n{contacts_text}\n\n" + prefix
+        prefix = f"🤝 <b>A USER OFFERED TO EXCHANGE CONTACTS!</b>\nThey have pre-selected private contacts to share. To view them, you must agree to share yours in exchange!\n\n" + prefix
         
     target_private_contacts = [c for c in target_prof.get("contacts", []) if not c.get("is_public")]
     has_target_private = len(target_private_contacts) > 0

@@ -212,11 +212,16 @@
                     myPrivateContacts = data.my_private_contacts || [];
                     renderRequests();
                 } else {
-                    document.getElementById('requests-list').innerHTML = "<p style='color:red;'>Failed to load requests.</p>";
+                    let errText = "Failed to load requests.";
+                    try {
+                        let errObj = await res.json();
+                        errText = errObj.detail || errText;
+                    } catch(_) {}
+                    document.getElementById('requests-list').innerHTML = `<p style='color:red;'>${escapeHtml(errText)}</p>`;
                 }
             } catch (e) {
                 console.error(e);
-                document.getElementById('requests-list').innerHTML = "<p style='color:red;'>An error occurred.</p>";
+                document.getElementById('requests-list').innerHTML = "<p style='color:red;'>An error occurred while loading requests.</p>";
             }
         }
 
@@ -235,12 +240,13 @@
             const list = currentTab === 'received' ? receivedRequests : sentRequests;
             
             const filtered = list.filter(r => {
-                const bio = r.other_profile.bio.toLowerCase();
-                const tags = r.other_profile.tags.map(t => `#${t}`).join(' ').toLowerCase();
-                const pUuid = r.other_profile.public_uuid.toLowerCase();
-                const publicCon = r.other_profile.public_contacts.join(' ').toLowerCase();
-                const disclosedCon = (r.disclosed_contacts || []).join(' ').toLowerCase();
-                const msg = r.message.toLowerCase();
+                const otherProf = r.other_profile || {};
+                const bio = (otherProf.bio || '').toLowerCase();
+                const tags = Array.isArray(otherProf.tags) ? otherProf.tags.map(t => `#${t}`).join(' ').toLowerCase() : '';
+                const pUuid = (otherProf.public_uuid || '').toLowerCase();
+                const publicCon = Array.isArray(otherProf.public_contacts) ? otherProf.public_contacts.join(' ').toLowerCase() : '';
+                const disclosedCon = Array.isArray(r.disclosed_contacts) ? r.disclosed_contacts.join(' ').toLowerCase() : '';
+                const msg = (r.message || '').toLowerCase();
                 
                 return bio.includes(q) || tags.includes(q) || pUuid.includes(q) || publicCon.includes(q) || disclosedCon.includes(q) || msg.includes(q);
             });
@@ -254,15 +260,16 @@
                 const card = document.createElement('div');
                 card.className = 'req-card';
                 
-                let statusLabel = r.status.toUpperCase();
+                let statusLabel = (r.status || 'PENDING').toUpperCase();
                 let statusColor = 'var(--tg-theme-text-color)';
                 if (r.status === 'pending') { statusColor = '#FF9800'; statusLabel = 'Pending'; }
                 else if (r.status === 'counter_pending') { statusColor = '#2196F3'; statusLabel = 'Mutual Exchange Offered'; }
                 else if (r.status === 'accepted') { statusColor = '#4CAF50'; statusLabel = 'Exchanged / Accepted'; }
                 else if (r.status === 'declined') { statusColor = '#F44336'; statusLabel = 'Declined'; }
                 
-                let tagsHtml = r.other_profile.tags.map(t => `#${t}`).join(' ');
-                let publicContactsHtml = r.other_profile.public_contacts.map(c => `• <code>${escapeHtml(c)}</code>`).join('<br>');
+                const otherProf = r.other_profile || {};
+                let tagsHtml = Array.isArray(otherProf.tags) ? otherProf.tags.map(t => `#${t}`).join(' ') : '';
+                let publicContactsHtml = Array.isArray(otherProf.public_contacts) ? otherProf.public_contacts.map(c => `• <code>${escapeHtml(c)}</code>`).join('<br>') : '';
                 
                 let messageBlock = '';
                 if (r.message) {
@@ -270,7 +277,7 @@
                 }
                 
                 let disclosedBlock = '';
-                if (r.status === 'accepted' && r.disclosed_contacts && r.disclosed_contacts.length > 0) {
+                if (r.status === 'accepted' && Array.isArray(r.disclosed_contacts) && r.disclosed_contacts.length > 0) {
                     let disclosedList = r.disclosed_contacts.map(c => `• <code>${escapeHtml(c)}</code>`).join('<br>');
                     disclosedBlock = `
                         <div style="background: rgba(76, 175, 80, 0.1); border-left: 4px solid #4CAF50; padding: 10px; border-radius: 6px; margin-top: 10px;">
@@ -305,11 +312,11 @@
                 
                 card.innerHTML = `
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                        <span style="font-weight:bold; font-size:14px;">ID: ${r.other_profile.public_uuid}</span>
-                        <span class="req-status" style="color:${statusColor}">${statusLabel}</span>
+                        <span style="font-weight:bold; font-size:14px;">ID: ${escapeHtml(otherProf.public_uuid || '')}</span>
+                        <span class="req-status" style="color:${statusColor}">${escapeHtml(statusLabel)}</span>
                     </div>
-                    <p class="req-bio">${r.other_profile.bio ? escapeHtml(r.other_profile.bio) : '<i>No bio set.</i>'}</p>
-                    <div style="font-size:12px; color:gray; margin-bottom:10px;">${tagsHtml}</div>
+                    <p class="req-bio">${otherProf.bio ? escapeHtml(otherProf.bio) : '<i>No bio set.</i>'}</p>
+                    <div style="font-size:12px; color:gray; margin-bottom:10px;">${escapeHtml(tagsHtml)}</div>
                     ${publicContactsHtml ? `<div style="font-size:13px; margin-bottom:10px;"><b>Public Contacts:</b><br>${publicContactsHtml}</div>` : ''}
                     ${messageBlock}
                     ${disclosedBlock}
@@ -326,7 +333,7 @@
             const checkboxesContainer = document.getElementById('checkboxes-container');
             checkboxesContainer.innerHTML = '';
             
-            if (myPrivateContacts.length === 0) {
+            if (!Array.isArray(myPrivateContacts) || myPrivateContacts.length === 0) {
                 checkboxesContainer.innerHTML = `
                     <p style="color:red; font-size:13px; font-weight:bold;">
                         ⚠️ You have no private contacts to share. Please add at least one private contact in the bot's 'Manage Contacts' section first!
@@ -351,8 +358,8 @@
                     const row = document.createElement('label');
                     row.className = 'checkbox-row';
                     row.innerHTML = `
-                        <input type="checkbox" name="private_contact" value="${c.id}">
-                        <span>${escapeHtml(c.value)}</span>
+                        <input type="checkbox" name="private_contact" value="${escapeHtml(c.id || '')}">
+                        <span>${escapeHtml(c.value || '')}</span>
                     `;
                     checkboxesContainer.appendChild(row);
                 });
@@ -367,7 +374,7 @@
 
         async function submitModal() {
             const selectedBoxes = document.querySelectorAll('input[name="private_contact"]:checked');
-            if (selectedBoxes.length === 0 && myPrivateContacts.length > 0) {
+            if (selectedBoxes.length === 0 && Array.isArray(myPrivateContacts) && myPrivateContacts.length > 0) {
                 alert("Please select at least one contact to share.");
                 return;
             }

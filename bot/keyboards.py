@@ -64,10 +64,14 @@ def profile_inline_kb(profile_uuid: str, sent_count: int = 0, recv_count: int = 
         ]
     ])
 
-def browse_inline_kb(target_uuid: str, has_private: bool = True) -> InlineKeyboardMarkup:
-    if not has_private:
+def browse_inline_kb(target_uuid: str, has_self_private: bool = True, has_target_private: bool = True) -> InlineKeyboardMarkup:
+    if not has_self_private:
         return InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔒 Add Private Contact to Interact", callback_data="no_private_alert")]
+        ])
+    if not has_target_private:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔒 User has no private contacts", callback_data="target_no_private_alert")]
         ])
     return InlineKeyboardMarkup(inline_keyboard=[
         [
