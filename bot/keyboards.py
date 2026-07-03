@@ -120,6 +120,16 @@ def contact_decision_kb(req_id: str, is_sending: bool = False, can_counter: bool
         row = [InlineKeyboardButton(text="✅ Share Contact", callback_data=f"accept_{req_id}")]
         if can_counter:
             row.append(InlineKeyboardButton(text="🔄 Ask For Theirs", callback_data=f"counter_{req_id}"))
+        else:
+            row.append(InlineKeyboardButton(text="🔒 Ask For Theirs (Disabled)", callback_data="disabled_counter_alert"))
         buttons.append(row)
     buttons.append([InlineKeyboardButton(text="❌ Hide/Decline", callback_data=f"decline_{req_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def mutual_exchange_kb(req_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Agree & Select Contacts", callback_data=f"agree_exchange_{req_id}"),
+            InlineKeyboardButton(text="❌ Decline", callback_data=f"decline_{req_id}")
+        ]
+    ])

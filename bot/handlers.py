@@ -101,7 +101,6 @@ async def capture_new_contact(message: types.Message, state: FSMContext):
         {"$push": {"contacts": new_contact}}
     )
     
-    # Изменено: отправляем только подтверждение успешного добавления контакта
     await message.answer("✅ Contact successfully added! You can toggle its visibility in the manager.", reply_markup=edit_info_menu_kb())
     await state.clear()
     await manage_contacts_menu(message)
@@ -202,7 +201,6 @@ async def capture_text(message: types.Message, state: FSMContext):
     await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"text": message.text}})
     logger.info(f"User {message.from_user.id} updated bio.")
     
-    # Изменено: отправляем только текстовое подтверждение без вывода карточки анкеты
     await message.answer("✅ Bio successfully saved!", reply_markup=edit_info_menu_kb())
     await state.clear()
 
@@ -234,14 +232,12 @@ async def capture_media(message: types.Message, state: FSMContext):
             await state.update_data(current_mg_id=message.media_group_id)
             await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": [media_doc]}})
             
-            # Изменено: клавиатура меню редактирования сразу устанавливается для этой операции
             await message.answer("✅ Processing album...", reply_markup=edit_info_menu_kb())
             
             async def show_updated_profile_after_delay():
                 await asyncio.sleep(1.5)
                 curr_state = await state.get_state()
                 if curr_state == ProfileSetup.waiting_for_media:
-                    # Изменено: отправляем только текстовое уведомление по окончании загрузки альбома
                     await bot.send_message(message.chat.id, "✅ Album successfully saved!", reply_markup=edit_info_menu_kb())
                     await state.clear()
             
@@ -254,7 +250,6 @@ async def capture_media(message: types.Message, state: FSMContext):
     else:
         await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": [media_doc]}})
         
-        # Изменено: отправляем только текстовое подтверждение
         await message.answer("✅ Media successfully saved!", reply_markup=edit_info_menu_kb())
         await state.clear()
 
@@ -320,7 +315,6 @@ async def manage_prof_cb(callback: types.CallbackQuery, state: FSMContext):
     is_active = profile.get('is_active', False)
     await callback.message.answer("⚙️ Managing Profile...", reply_markup=manage_action_kb(is_active))
     
-    # Всегда присылаем встроенные инлайн-кнопки тегов/фильтров анкеты под ней
     await send_profile(callback.from_user.id, profile, profile_inline_kb(prof_uuid))
     await callback.answer()
 
@@ -504,12 +498,82 @@ async def toggle_share_selection(callback: types.CallbackQuery, state: FSMContex
 async def confirm_share_contacts_cb(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     accepting_req_id = data.get("accepting_req_id")
+    countering_req_id = data.get("countering_req_id")
+    agreeing_exchange_req_id = data.get("agreeing_exchange_req_id")
     
     selected_ids = data.get("selected_contact_ids", [])
     active_prof = await Database.get_active_profile(callback.from_user.id)
     shared_contacts = [c["value"] for c in active_prof.get("contacts", []) if c["id"] in selected_ids]
     
-    if accepting_req_id:
+    if not shared_contacts:
+        return await callback.answer("⚠️ You must select at least one contact to share.", show_alert=True)
+        
+    if countering_req_id:
+        req = await Database.db.contact_requests.find_one({"req_id": countering_req_id})
+        if not req or req['status'] != 'pending':
+            await state.clear()
+            return await callback.answer("This request has expired or was already handled.", show_alert=True)
+            
+        await Database.db.contact_requests.update_one(
+            {"req_id": countering_req_id}, 
+            {"$set": {
+                "status": "counter_pending",
+                "counter_shared_contacts": shared_contacts
+            }}
+        )
+        
+        b_profile = await Database.get_active_profile(callback.from_user.id)
+        offered_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
+        
+        prefix = (
+            f"🔄 <b>MUTUAL EXCHANGE REQUEST!</b>\n"
+            f"The user wants to exchange private contacts with you!\n"
+            f"If you agree, you will receive these contacts of theirs:\n\n"
+            f"{offered_contacts_text}\n\n"
+            f"Please choose your option below:"
+        )
+        
+        await send_profile(
+            req['initiator_id'], 
+            b_profile, 
+            mutual_exchange_kb(countering_req_id), 
+            custom_prefix=prefix
+        )
+        
+        await callback.message.answer("✅ Mutual exchange request sent! Awaiting response from the other user.", reply_markup=browse_kb())
+        await callback.message.delete()
+        await state.clear()
+        
+    elif agreeing_exchange_req_id:
+        req = await Database.db.contact_requests.find_one({"req_id": agreeing_exchange_req_id})
+        if not req or req['status'] != 'counter_pending':
+            await state.clear()
+            return await callback.answer("This request has expired or was already handled.", show_alert=True)
+            
+        await Database.db.contact_requests.update_one(
+            {"req_id": agreeing_exchange_req_id}, 
+            {"$set": {
+                "status": "accepted",
+                "initiator_shared_contacts": shared_contacts
+            }}
+        )
+        
+        b_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in req['counter_shared_contacts'])
+        a_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
+        
+        await callback.message.answer(
+            f"🤝 <b>Mutual Exchange Complete!</b>\nHere are the contact details they shared with you:\n\n{b_contacts_text}"
+        )
+        
+        await bot.send_message(
+            req['target_id'], 
+            f"🤝 <b>Mutual Exchange Complete!</b>\nHere are the contact details they shared with you:\n\n{a_contacts_text}"
+        )
+        
+        await callback.message.delete()
+        await state.clear()
+        
+    elif accepting_req_id:
         req = await Database.db.contact_requests.find_one({"req_id": accepting_req_id})
         if not req or req['status'] != 'pending':
             await state.clear()
@@ -612,7 +676,10 @@ async def execute_contact_request(user_id: int, state: FSMContext, message=None)
         contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
         prefix = f"🤝 <b>A USER SHARED THEIR CONTACT!</b>\nShared details:\n{contacts_text}\n\n" + prefix
         
-    await send_profile(target_prof['user_id'], initiator, contact_decision_kb(req_id, is_sending=(data['action']=="send")), custom_prefix=prefix)
+    target_private_contacts = [c for c in target_prof.get("contacts", []) if not c.get("is_public")]
+    has_target_private = len(target_private_contacts) > 0
+    
+    await send_profile(target_prof['user_id'], initiator, contact_decision_kb(req_id, is_sending=(data['action']=="send"), can_counter=has_target_private), custom_prefix=prefix)
     await state.clear()
 
 # --- CONTACT DECISION HANDLERS ---
@@ -624,16 +691,23 @@ async def contact_decisions(callback: types.CallbackQuery, state: FSMContext):
     req_id = parts[1]
     
     req = await Database.db.contact_requests.find_one({"req_id": req_id})
-    if not req or req['status'] != 'pending':
+    if not req:
         return await callback.answer("This request has expired or was already handled.", show_alert=True)
         
     if decision == "decline":
+        if req['status'] not in ['pending', 'counter_pending']:
+            return await callback.answer("This request has expired or was already handled.", show_alert=True)
+            
         await Database.db.contact_requests.update_one({"req_id": req_id}, {"$set": {"status": "declined"}})
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.reply("❌ Request declined and hidden.")
         logger.info(f"Request {req_id} declined.")
+        return await callback.answer()
         
     elif decision == "accept":
+        if req['status'] != 'pending':
+            return await callback.answer("This request has expired or was already handled.", show_alert=True)
+            
         active_prof = await Database.get_active_profile(callback.from_user.id)
         await Database.sync_telegram_username(active_prof, callback.from_user.username)
         active_prof = await Database.get_active_profile(callback.from_user.id)
@@ -657,29 +731,71 @@ async def contact_decisions(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer()
         
     elif decision == "counter":
-        await Database.db.contact_requests.update_one({"req_id": req_id}, {"$set": {"status": "countered"}})
+        if req['status'] != 'pending':
+            return await callback.answer("This request has expired or was already handled.", show_alert=True)
+            
+        active_prof = await Database.get_active_profile(callback.from_user.id)
+        private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
+        if not private_contacts:
+            return await callback.answer("⚠️ You have no private contacts to share. Please add one first under Manage Contacts.", show_alert=True)
+            
+        initiator_prof = await Database.get_active_profile(req['initiator_id'])
+        if not initiator_prof:
+            return await callback.answer("⚠️ The initiator's profile no longer exists.", show_alert=True)
+            
+        initiator_private = [c for c in initiator_prof.get("contacts", []) if not c.get("is_public")]
+        if not initiator_private:
+            return await callback.answer("⚠️ The other user no longer has private contacts to exchange.", show_alert=True)
+            
+        await state.update_data(
+            countering_req_id=req_id,
+            selected_contact_ids=[private_contacts[0]["id"]]
+        )
+        await state.set_state(ContactRequest.selecting_contacts)
         
-        new_req_id = uuid.uuid4().hex
-        counter_doc = {
-            "req_id": new_req_id,
-            "initiator_id": callback.from_user.id,
-            "target_id": req['initiator_id'],
-            "action": "req",
-            "status": "pending",
-            "is_counter": True, 
-            "message": "[Automated Counter-Request]"
-        }
-        await Database.db.contact_requests.insert_one(counter_doc)
+        kb = contact_share_selection_kb(private_contacts, [private_contacts[0]["id"]])
+        await callback.message.answer(
+            "🔒 <b>Select Your Private Contacts to Exchange</b>\n"
+            "Choose which of your private contact details you want to share if they agree to the mutual exchange:",
+            reply_markup=kb
+        )
+        await callback.answer()
+
+@router.callback_query(F.data == "disabled_counter_alert")
+async def disabled_counter_alert_cb(callback: types.CallbackQuery):
+    await callback.answer(
+        "⚠️ You cannot use mutual exchange because your profile has no private contacts to offer.\n"
+        "Please add at least one private contact under 'Manage Contacts' first.",
+        show_alert=True
+    )
+
+@router.callback_query(F.data.startswith("agree_exchange_"))
+async def agree_exchange_cb(callback: types.CallbackQuery, state: FSMContext):
+    req_id = callback.data.split("_")[2]
+    req = await Database.db.contact_requests.find_one({"req_id": req_id})
+    if not req or req['status'] != 'counter_pending':
+        return await callback.answer("This request has expired or was already handled.", show_alert=True)
         
-        target_prof = await Database.get_active_profile(callback.from_user.id)
-        prefix = f"🔄 <b>COUNTER REQUEST!</b>\nThe user wants you to share your contact first.\n\n"
+    active_prof = await Database.get_active_profile(callback.from_user.id)
+    await Database.sync_telegram_username(active_prof, callback.from_user.username)
+    active_prof = await Database.get_active_profile(callback.from_user.id)
+    
+    private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
+    if not private_contacts:
+        return await callback.answer("⚠️ You must set at least one private contact under '📝 Edit Active Profile' -> '📞 Manage Contacts' first.", show_alert=True)
         
-        await send_profile(req['initiator_id'], target_prof, contact_decision_kb(new_req_id, is_sending=False, can_counter=False), custom_prefix=prefix)
-        
-        await callback.message.edit_reply_markup(reply_markup=None)
-        await callback.message.reply("🔄 You asked them to share their contact first. Awaiting response.")
-        logger.info(f"Request {req_id} countered.")
-        
+    await state.update_data(
+        agreeing_exchange_req_id=req_id,
+        selected_contact_ids=[private_contacts[0]["id"]]
+    )
+    await state.set_state(ContactRequest.selecting_contacts)
+    
+    kb = contact_share_selection_kb(private_contacts, [private_contacts[0]["id"]])
+    await callback.message.answer(
+        "🔒 <b>Select Your Private Contacts to Share in Response</b>\n"
+        "Choose which of your private contact details you want to share with this user to complete the exchange:",
+        reply_markup=kb
+    )
     await callback.answer()
 
 # --- FALLBACK HANDLER ---
