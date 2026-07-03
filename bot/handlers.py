@@ -19,7 +19,7 @@ async def show_main_menu(message: types.Message, state: FSMContext):
     active_profile = await Database.get_or_create_active_profile(message.from_user.id)
     
     # 1. Отправляем только эмодзи-маркер для бесшовного обновления Reply-клавиатуры
-    await message.answer("🏠", reply_markup=main_menu_kb())
+    await message.answer("🏠 View Active Profile 🏠", reply_markup=main_menu_kb())
     # 2. Сразу присылаем саму анкету с встроенными кнопками тегов/фильтров под ней
     await send_profile(message.chat.id, active_profile, profile_inline_kb(active_profile['public_uuid']))
 
@@ -156,7 +156,7 @@ async def profiles_menu(message: types.Message):
         inline_kb.append([InlineKeyboardButton(text=f"{p['public_uuid']} [{status}]", callback_data=f"manage_prof_{p['public_uuid']}")])
         
     # 1. Отправляем эмодзи-маркер для переключения Reply-клавиатуры
-    await message.answer("👥", reply_markup=profiles_menu_kb())
+    await message.answer("👥 Profiles", reply_markup=profiles_menu_kb())
     
     # 2. Объединено: Выводим сводку по профилям и список с инлайн-кнопками в ОДНОМ красивом сообщении
     if inline_kb:
