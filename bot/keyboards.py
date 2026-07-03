@@ -1,7 +1,7 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
 from core.config import WEBHOOK_URL
 
-# --- REPLY KEYBOARDS (Нижние кнопки меню) ---
+# --- REPLY KEYBOARDS ---
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
@@ -14,7 +14,6 @@ def edit_info_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="✏️ Bio")], 
         [KeyboardButton(text="🌐 Public Contacts"), KeyboardButton(text="🔒 Private Contacts")],
-        # Переименовано по вашему требованию
         [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
 
@@ -25,7 +24,6 @@ def edit_fsm_kb() -> ReplyKeyboardMarkup:
 
 def browse_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="💌 Request Contact"), KeyboardButton(text="🤝 Send Contact")],
         [KeyboardButton(text="⏩ Next Profile")],
         [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
@@ -40,11 +38,17 @@ def manage_action_kb() -> ReplyKeyboardMarkup:
 def profiles_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="➕ Create Profile")],
-        [KeyboardButton(text="🗑️ Delete All But Active")],
+        [KeyboardButton(text="🗑️ Delete All But Active"), KeyboardButton(text="💣 Delete All Profiles")],
         [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
 
-# --- INLINE KEYBOARDS (Кнопки под сообщениями) ---
+def confirm_delete_all_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="⚠️ YES, DELETE ALL PROFILES")],
+        [KeyboardButton(text="❌ Cancel")]
+    ], resize_keyboard=True)
+
+# --- INLINE KEYBOARDS ---
 
 def profile_inline_kb(profile_uuid: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -54,15 +58,26 @@ def profile_inline_kb(profile_uuid: str) -> InlineKeyboardMarkup:
         ]
     ])
 
-def skip_message_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⏭️ Skip Message & Send", callback_data="skip_req_msg")]])
+def browse_inline_kb(target_uuid: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="💌 Request", callback_data=f"req_{target_uuid}"),
+            InlineKeyboardButton(text="💌 Req + Msg", callback_data=f"reqmsg_{target_uuid}")
+        ],
+        [
+            InlineKeyboardButton(text="🤝 Send Contact", callback_data=f"send_{target_uuid}"),
+            InlineKeyboardButton(text="🤝 Send + Msg", callback_data=f"sendmsg_{target_uuid}")
+        ]
+    ])
 
 def contact_decision_kb(req_id: str, is_sending: bool = False) -> InlineKeyboardMarkup:
     buttons = []
     if is_sending:
         buttons.append([InlineKeyboardButton(text="🤝 Share Mine Too", callback_data=f"accept_{req_id}")])
     else:
-        buttons.append([InlineKeyboardButton(text="✅ Share Contact", callback_data=f"accept_{req_id}")])
-        buttons.append([InlineKeyboardButton(text="🔄 Ask For Theirs", callback_data=f"counter_{req_id}")])
+        buttons.append([
+            InlineKeyboardButton(text="✅ Share Contact", callback_data=f"accept_{req_id}"),
+            InlineKeyboardButton(text="🔄 Ask For Theirs", callback_data=f"counter_{req_id}")
+        ])
     buttons.append([InlineKeyboardButton(text="❌ Hide/Decline", callback_data=f"decline_{req_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

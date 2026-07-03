@@ -2,6 +2,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import uuid
 import datetime
 from core.config import MONGODB_URI
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Database:
     client: AsyncIOMotorClient = None
@@ -11,10 +14,13 @@ class Database:
     def connect(cls):
         cls.client = AsyncIOMotorClient(MONGODB_URI, tls=True, tlsAllowInvalidCertificates=True)
         cls.db = cls.client["day_dating_bot"]
+        logger.info("Connected to MongoDB.")
 
     @classmethod
     def disconnect(cls):
-        if cls.client: cls.client.close()
+        if cls.client: 
+            cls.client.close()
+            logger.info("Disconnected from MongoDB.")
 
     @classmethod
     async def log_action(cls, user_id: int, action_type: str, data: dict):
@@ -26,25 +32,30 @@ class Database:
         })
 
     @classmethod
-    async def get_or_create_active_profile(cls, user_id: int) -> dict:
+    async def get_or_create_active_profile(cls, user_id: int, username: str = None) -> dict:
         active = await cls.db.profiles.find_one({"user_id": user_id, "is_active": True})
-        if active: return active
+        if active: 
+            # Update username silently if it changed
+            if username and active.get("username") != username:
+                await cls.db.profiles.update_one({"_id": active["_id"]}, {"$set": {"username": username}})
+            return active
         
         any_profile = await cls.db.profiles.find_one({"user_id": user_id})
         if any_profile:
             await cls.set_active_profile(user_id, any_profile['public_uuid'])
             return await cls.db.profiles.find_one({"public_uuid": any_profile['public_uuid']})
             
-        return await cls.create_profile(user_id)
+        return await cls.create_profile(user_id, username)
 
     @classmethod
-    async def create_profile(cls, user_id: int) -> dict | None:
+    async def create_profile(cls, user_id: int, username: str = None) -> dict | None:
         if await cls.db.profiles.count_documents({"user_id": user_id}) >= 100:
-            return None # Enforce 100 limit
+            return None 
 
         public_uuid = uuid.uuid4().hex[:8]
         profile = {
             "user_id": user_id,
+            "username": username,
             "public_uuid": public_uuid,
             "tags": [],
             "filters": {"require_tags": [], "exclude_tags": [], "any_tags": []},
@@ -61,12 +72,14 @@ class Database:
 
         res = await cls.db.profiles.insert_one(profile)
         profile["_id"] = res.inserted_id
+        logger.info(f"Created new profile {public_uuid} for user {user_id}")
         return profile
 
     @classmethod
     async def set_active_profile(cls, user_id: int, profile_uuid: str):
         await cls.db.profiles.update_many({"user_id": user_id}, {"$set": {"is_active": False}})
         await cls.db.profiles.update_one({"user_id": user_id, "public_uuid": profile_uuid}, {"$set": {"is_active": True}})
+        logger.info(f"User {user_id} set profile {profile_uuid} as active.")
 
     @classmethod
     async def get_active_profile(cls, user_id: int):
@@ -85,6 +98,7 @@ class Database:
         if not active:
             any_prof = await cls.db.profiles.find_one({"user_id": user_id})
             if any_prof: await cls.set_active_profile(user_id, any_prof['public_uuid'])
+        logger.info(f"User {user_id} deleted profile {public_uuid}.")
         return True
 
     @classmethod
@@ -94,3 +108,26 @@ class Database:
     @classmethod
     async def delete_all_profiles(cls, user_id: int):
         await cls.db.profiles.delete_many({"user_id": user_id})
+        await cls.db.search_sessions.delete_many({"user_id": user_id})
+        
+    # --- Session Tracking ---
+    @classmethod
+    async def add_seen_profile(cls, user_id: int, seen_uuid: str):
+        await cls.db.search_sessions.update_one(
+            {"user_id": user_id}, 
+            {"$addToSet": {"seen_uuids": seen_uuid}}, 
+            upsert=True
+        )
+
+    @classmethod
+    async def clear_seen_profiles(cls, user_id: int):
+        await cls.db.search_sessions.update_one(
+            {"user_id": user_id}, 
+            {"$set": {"seen_uuids": []}}, 
+            upsert=True
+        )
+
+    @classmethod
+    async def get_seen_profiles(cls, user_id: int) -> list:
+        session = await cls.db.search_sessions.find_one({"user_id": user_id})
+        return session.get("seen_uuids", []) if session else []
