@@ -33,7 +33,9 @@ async def edit_info_menu(message: types.Message):
 @router.message(F.text == "✏️ Bio")
 async def init_edit_bio(message: types.Message, state: FSMContext):
     await state.set_state(ProfileSetup.waiting_for_bio)
-    await message.answer("Send your new Bio:", reply_markup=edit_fsm_kb())
+    active_prof = await Database.get_active_profile(message.from_user.id)
+    has_bio = bool(active_prof.get("text")) if active_prof else False
+    await message.answer("Send your new Bio:", reply_markup=edit_fsm_kb(show_clear=has_bio))
 
 # --- UNIFIED CONTACTS MANAGER ---
 
@@ -164,7 +166,9 @@ async def delete_contact(callback: types.CallbackQuery):
 @router.message(F.text == "📸 Edit Media")
 async def init_edit_media(message: types.Message, state: FSMContext):
     await state.set_state(ProfileSetup.waiting_for_media)
-    await message.answer("Send a single media file, OR an album of up to 10 photos/videos in one message.", reply_markup=edit_fsm_kb())
+    active_prof = await Database.get_active_profile(message.from_user.id)
+    has_media = bool(active_prof.get("media")) if active_prof else False
+    await message.answer("Send a single media file, OR an album of up to 10 photos/videos in one message.", reply_markup=edit_fsm_kb(show_clear=has_media))
 
 @router.message(StateFilter("*"), F.text == "❌ Cancel")
 async def fsm_cancel(message: types.Message, state: FSMContext):

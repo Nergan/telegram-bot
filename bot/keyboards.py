@@ -18,10 +18,11 @@ def edit_info_menu_kb() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
 
-def edit_fsm_kb() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="❌ Cancel"), KeyboardButton(text="🗑️ Clear Field")]
-    ], resize_keyboard=True)
+def edit_fsm_kb(show_clear: bool = True) -> ReplyKeyboardMarkup:
+    buttons = [KeyboardButton(text="❌ Cancel")]
+    if show_clear:
+        buttons.append(KeyboardButton(text="🗑️ Clear Field"))
+    return ReplyKeyboardMarkup(keyboard=[buttons], resize_keyboard=True)
 
 def cancel_fsm_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
