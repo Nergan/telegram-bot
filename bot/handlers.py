@@ -88,7 +88,7 @@ async def capture_new_contact(message: types.Message, state: FSMContext):
         "id": cid,
         "type": "custom",
         "value": message.text,
-        "is_public": False # По умолчанию приватный
+        "is_public": False 
     }
     
     await Database.db.profiles.update_one(
@@ -102,7 +102,8 @@ async def capture_new_contact(message: types.Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("togglecon_"))
 async def toggle_contact_visibility(callback: types.CallbackQuery):
-    cid = callback.data.split("_")[1]
+    # Безопасное извлечение ID контакта, поддерживающее символы подчеркивания (tg_username)
+    cid = callback.data.replace("togglecon_", "", 1)
     active_prof = await Database.get_active_profile(callback.from_user.id)
     
     contacts = active_prof.get("contacts", [])
@@ -130,7 +131,8 @@ async def toggle_contact_visibility(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("delcon_"))
 async def delete_contact(callback: types.CallbackQuery):
-    cid = callback.data.split("_")[1]
+    # Безопасное извлечение ID
+    cid = callback.data.replace("delcon_", "", 1)
     if cid == "tg_username":
         return await callback.answer("❌ You cannot delete your Telegram username contact.", show_alert=True)
         
@@ -273,65 +275,6 @@ async def del_all_but_active(message: types.Message):
     await message.answer("✅ All inactive profiles deleted.")
     await profiles_menu(message)
 
-@router.message(F.text == "💣 Delete All Profiles")
-async def request_del_all(message: types.Message, state: FSMContext):
-    await state.set_state(ProfileSetup.waiting_for_delete_all)
-    await message.answer("⚠️ <b>WARNING:</b> This will permanently delete ALL your profiles.\nAre you absolutely sure?", reply_markup=confirm_delete_all_kb())
-
-@router.message(ProfileSetup.waiting_for_delete_all)
-async def confirm_del_all(message: types.Message, state: FSMContext):
-    if message.text == "⚠️ YES, DELETE ALL PROFILES":
-        await Database.delete_all_profiles(message.from_user.id)
-        await message.answer("✅ All profiles completely wiped.\nA new blank profile will be created.")
-        await state.clear()
-        await show_main_menu(message, state)
-    else:
-        await fsm_cancel(message, state)
-
-@router.callback_query(F.data.startswith("manage_prof_"))
-async def manage_prof_cb(callback: types.CallbackQuery, state: FSMContext):
-    prof_uuid = callback.data.split("_")[2]
-    profile = await Database.get_profile_by_uuid(prof_uuid)
-    if not profile or profile['user_id'] != callback.from_user.id:
-        return await callback.answer("❌ Profile not found.", show_alert=True)
-    
-    await state.update_data(managing_uuid=prof_uuid)
-    await callback.message.delete()
-    await send_profile(callback.from_user.id, profile, manage_action_kb())
-    await callback.answer()
-
-@router.message(F.text.in_({"🌟 Set Active", "👁️ Toggle Vis", "🔄 Regen ID", "🗑️ Delete"}))
-async def manage_actions(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    prof_uuid = data.get("managing_uuid")
-    if not prof_uuid: return await show_main_menu(message, state)
-    
-    user_id = message.from_user.id
-    p = await Database.get_profile_by_uuid(prof_uuid)
-    if not p: return await show_main_menu(message, state)
-
-    if message.text == "🌟 Set Active":
-        await Database.set_active_profile(user_id, prof_uuid)
-        await message.answer("🌟 Profile Activated!")
-        await show_main_menu(message, state)
-    elif message.text == "👁️ Toggle Vis":
-        await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"is_hidden": not p.get('is_hidden', False)}})
-        await message.answer("👁️ Visibility toggled.")
-        await profiles_menu(message)
-    elif message.text == "🔄 Regen ID":
-        new_uuid = uuid.uuid4().hex[:8]
-        await Database.db.profiles.update_one({"public_uuid": prof_uuid}, {"$set": {"public_uuid": new_uuid}})
-        await state.update_data(managing_uuid=new_uuid)
-        p = await Database.get_profile_by_uuid(new_uuid)
-        await send_profile(message.chat.id, p, manage_action_kb())
-    elif message.text == "🗑️ Delete":
-        success = await Database.delete_profile(user_id, prof_uuid)
-        if success:
-            await message.answer("🗑️ Profile Deleted.")
-            await profiles_menu(message)
-        else:
-            await message.answer("❌ Cannot delete your only profile.")
-
 # --- BROWSING & CONTACT REQUESTS ---
 
 @router.message(F.text.in_({"🔍 Browse", "⏩ Next Profile"}))
@@ -370,7 +313,6 @@ async def browse_next(message: types.Message, state: FSMContext):
     
     await message.answer("🔍 Browsing...", reply_markup=browse_kb())
     
-    # Проверка наличия приватных контактов для управления доступностью кнопок запроса
     private_contacts = [c for c in active.get("contacts", []) if not c.get("is_public")]
     has_private = len(private_contacts) > 0
     
@@ -409,7 +351,7 @@ async def init_contact_inline(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(
         target_uuid=target_uuid, 
         action=db_action,
-        selected_contact_ids=[] # Сброс при каждом начале запроса
+        selected_contact_ids=[] 
     )
     
     if has_msg:
@@ -444,7 +386,6 @@ async def show_contact_selection(event: types.CallbackQuery | types.Message, sta
     data = await state.get_data()
     selected_ids = data.get("selected_contact_ids", [])
     if not selected_ids:
-        # По умолчанию выбираем первый доступный контакт
         selected_ids = [private_contacts[0]["id"]]
         await state.update_data(selected_contact_ids=selected_ids)
         
@@ -505,13 +446,11 @@ async def confirm_share_contacts_cb(callback: types.CallbackQuery, state: FSMCon
         
         contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
         
-        # Уведомляем инициатора о согласии и делимся выбранными контактами
         await bot.send_message(
             req['initiator_id'], 
             f"✅ <b>Request Accepted!</b>\nThe user shared their contact details:\n\n{contacts_text}"
         )
         
-        # Если это был взаимный обмен (action == "send"), выводим ответные контакты
         initiator_shared = req.get("shared_contacts", [])
         if initiator_shared:
             init_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in initiator_shared)
@@ -648,7 +587,7 @@ async def contact_decisions(callback: types.CallbackQuery, state: FSMContext):
             "target_id": req['initiator_id'],
             "action": "req",
             "status": "pending",
-            "is_counter": True, # Помечаем как встречный запрос
+            "is_counter": True, 
             "message": "[Automated Counter-Request]"
         }
         await Database.db.contact_requests.insert_one(counter_doc)
@@ -656,7 +595,6 @@ async def contact_decisions(callback: types.CallbackQuery, state: FSMContext):
         target_prof = await Database.get_active_profile(callback.from_user.id)
         prefix = f"🔄 <b>COUNTER REQUEST!</b>\nThe user wants you to share your contact first.\n\n"
         
-        # Блокируем встречные цепочки, устанавливая can_counter=False
         await send_profile(req['initiator_id'], target_prof, contact_decision_kb(new_req_id, is_sending=False, can_counter=False), custom_prefix=prefix)
         
         await callback.message.edit_reply_markup(reply_markup=None)

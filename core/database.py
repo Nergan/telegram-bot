@@ -61,7 +61,7 @@ class Database:
             "public_uuid": public_uuid,
             "tags": [],
             "filters": {"require_tags": [], "exclude_tags": [], "any_tags": []},
-            "contacts": [], # Единый массив контактов
+            "contacts": [], 
             "text": None,
             "media": [], 
             "is_active": False,
@@ -82,7 +82,6 @@ class Database:
 
     @classmethod
     async def sync_telegram_username(cls, profile: dict, username: str):
-        """Гарантирует автоматическое добавление и актуализацию TG-username в контактах"""
         if not username:
             return
         contacts = profile.get("contacts", [])
@@ -96,7 +95,7 @@ class Database:
                 "id": "tg_username",
                 "type": "username",
                 "value": val,
-                "is_public": False # По умолчанию скрыт в приватных
+                "is_public": False 
             })
             await cls.db.profiles.update_one({"_id": profile["_id"]}, {"$set": {"contacts": contacts}})
         else:
@@ -127,17 +126,11 @@ class Database:
         if not active:
             any_prof = await cls.db.profiles.find_one({"user_id": user_id})
             if any_prof: await cls.set_active_profile(user_id, any_prof['public_uuid'])
-        logger.info(f"User {user_id} deleted profile {public_uuid}.")
         return True
 
     @classmethod
     async def delete_all_but_active(cls, user_id: int):
         await cls.db.profiles.delete_many({"user_id": user_id, "is_active": False})
-
-    @classmethod
-    async def delete_all_profiles(cls, user_id: int):
-        await cls.db.profiles.delete_many({"user_id": user_id})
-        await cls.db.search_sessions.delete_many({"user_id": user_id})
         
     # --- Session Tracking ---
     @classmethod

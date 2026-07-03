@@ -13,7 +13,7 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
 def edit_info_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="✏️ Bio")], 
-        [KeyboardButton(text="📞 Manage Contacts")], # Единое меню управления контактами
+        [KeyboardButton(text="📞 Manage Contacts")], 
         [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
 
@@ -36,16 +36,11 @@ def manage_action_kb() -> ReplyKeyboardMarkup:
     ], resize_keyboard=True)
 
 def profiles_menu_kb() -> ReplyKeyboardMarkup:
+    """Убрана кнопка💣 Delete All Profiles"""
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="➕ Create Profile")],
-        [KeyboardButton(text="🗑️ Delete All But Active"), KeyboardButton(text="💣 Delete All Profiles")],
+        [KeyboardButton(text="🗑️ Delete All But Active")],
         [KeyboardButton(text="🏠 View Active Profile")]
-    ], resize_keyboard=True)
-
-def confirm_delete_all_kb() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="⚠️ YES, DELETE ALL PROFILES")],
-        [KeyboardButton(text="❌ Cancel")]
     ], resize_keyboard=True)
 
 # --- INLINE KEYBOARDS ---
@@ -59,7 +54,6 @@ def profile_inline_kb(profile_uuid: str) -> InlineKeyboardMarkup:
     ])
 
 def browse_inline_kb(target_uuid: str, has_private: bool = True) -> InlineKeyboardMarkup:
-    """Генерирует клавиатуру просмотра. Блокирует действия при отсутствии приватных контактов"""
     if not has_private:
         return InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔒 Add Private Contact to Interact", callback_data="no_private_alert")]
@@ -76,7 +70,6 @@ def browse_inline_kb(target_uuid: str, has_private: bool = True) -> InlineKeyboa
     ])
 
 def manage_contacts_inline_kb(contacts: list) -> InlineKeyboardMarkup:
-    """Интерфейс изменения видимости и удаления контактов"""
     keyboard = []
     for c in contacts:
         cid = c["id"]
@@ -85,7 +78,6 @@ def manage_contacts_inline_kb(contacts: list) -> InlineKeyboardMarkup:
         vis_text = "🌐 Make Public" if not c.get("is_public") else "🔒 Make Private"
         row = [InlineKeyboardButton(text=f"{vis_text} ({val_truncated})", callback_data=f"togglecon_{cid}")]
         
-        # TG Username защищен от удаления
         if cid != "tg_username":
             row.append(InlineKeyboardButton(text="🗑️ Del", callback_data=f"delcon_{cid}"))
             
@@ -95,7 +87,6 @@ def manage_contacts_inline_kb(contacts: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def contact_share_selection_kb(private_contacts: list, selected_ids: list) -> InlineKeyboardMarkup:
-    """Клавиатура точечного выбора контактов для отправки другому пользователю"""
     keyboard = []
     for c in private_contacts:
         cid = c["id"]
@@ -115,7 +106,6 @@ def skip_message_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⏭️ Skip Message & Send", callback_data="skip_req_msg")]])
 
 def contact_decision_kb(req_id: str, is_sending: bool = False, can_counter: bool = True) -> InlineKeyboardMarkup:
-    """При встречных запросах (is_counter=True) кнопка Ask For Theirs скрывается"""
     buttons = []
     if is_sending:
         buttons.append([InlineKeyboardButton(text="🤝 Share Mine Too", callback_data=f"accept_{req_id}")])
