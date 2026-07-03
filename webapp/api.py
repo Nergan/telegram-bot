@@ -45,9 +45,10 @@ async def update_tags(payload: WebAppPayload):
         await Database.db.profiles.update_one({"user_id": user_id, "public_uuid": payload.profile_id}, {"$set": {"tags": payload.tags}})
         active = await Database.get_active_profile(user_id)
         if active and active['public_uuid'] == payload.profile_id:
-            await send_profile(user_id, active, profile_inline_kb(active['public_uuid']))
+            # Изменено: отправляем только текстовое подтверждение без карточки профиля
+            await bot.send_message(user_id, "✅ Tags successfully updated!")
     else:
-        # Изменение фильтров: отправляем короткое подтверждение без лишнего дублирования анкеты
+        # Изменение фильтров: отправляем короткое подтверждение без дублирования анкеты
         f_data = {"require_tags": payload.require_tags, "exclude_tags": payload.exclude_tags, "any_tags": payload.any_tags}
         await Database.db.profiles.update_one({"user_id": user_id, "public_uuid": payload.profile_id}, {"$set": {"filters": f_data}})
         active = await Database.get_active_profile(user_id)

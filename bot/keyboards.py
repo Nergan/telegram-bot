@@ -4,10 +4,11 @@ from core.config import WEBHOOK_URL
 # --- REPLY KEYBOARDS ---
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
+    """Главное меню (добавлена кнопка View Active Profile на первую клавиатуру)"""
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🔍 Browse")],
         [KeyboardButton(text="📝 Edit Active Profile")],
-        [KeyboardButton(text="👥 Profiles")]
+        [KeyboardButton(text="👥 Profiles"), KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
 
 def edit_info_menu_kb() -> ReplyKeyboardMarkup:
@@ -38,7 +39,7 @@ def manage_action_kb(is_active: bool = False) -> ReplyKeyboardMarkup:
     if not is_active:
         keyboard.append([KeyboardButton(text="🌟 Set Active")])
     keyboard.append([KeyboardButton(text="🔄 Regen ID"), KeyboardButton(text="🗑️ Delete")])
-    keyboard.append([KeyboardButton(text="👥 View profiles again")]) # Добавлена кнопка возврата к списку
+    keyboard.append([KeyboardButton(text="👥 View profiles again")])
     keyboard.append([KeyboardButton(text="🏠 View Active Profile")])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
