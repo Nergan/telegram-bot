@@ -13,14 +13,15 @@ from core.database import Database
 router = Router()
 
 @router.message(CommandStart())
-@router.message(F.text == "🏠 Main Menu")
+# Обработчик переименован на "🏠 View Active Profile"
+@router.message(F.text == "🏠 View Active Profile")
 async def show_main_menu(message: types.Message, state: FSMContext):
     await state.clear()
     active_profile = await Database.get_or_create_active_profile(message.from_user.id)
     
-    # 1. Отправляем меню команд главного меню
-    await message.answer("Your active profile:", reply_markup=main_menu_kb())
-    # 2. Отображаем сам профиль с встроенными кнопками тегов/фильтров
+    # Отправляем только эмодзи-маркер для бесшовного обновления Reply-клавиатуры
+    await message.answer("🏠", reply_markup=main_menu_kb())
+    # Сразу присылаем саму анкету
     await send_profile(message.chat.id, active_profile, profile_inline_kb(active_profile['public_uuid']))
 
 @router.message(F.text == "🔒 View Private Contacts")
@@ -155,11 +156,13 @@ async def profiles_menu(message: types.Message):
         if p.get("is_hidden"): status += " 👻 Hidden"
         inline_kb.append([InlineKeyboardButton(text=f"{p['public_uuid']} [{status}]", callback_data=f"manage_prof_{p['public_uuid']}")])
         
-    await message.answer(f"👥 <b>Your Profiles Pool ({count}/100)</b>", reply_markup=profiles_menu_kb())
+    # 1. Отправляем эмодзи-маркер для переключения Reply-клавиатуры
+    await message.answer("👥", reply_markup=profiles_menu_kb())
     
+    # 2. Объединено: Выводим сводку по профилям и список с инлайн-кнопками в ОДНОМ красивом сообщении
     if inline_kb:
         await message.answer(
-            "Select an identity below to manage it:", 
+            f"👥 <b>Your Profiles Pool ({count}/100)</b>\nSelect an identity below to manage it:", 
             reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_kb)
         )
 
@@ -238,6 +241,7 @@ async def manage_actions(message: types.Message, state: FSMContext):
 
 # --- BROWSING ---
 
+@router.message(Command("browse"))
 @router.message(F.text.in_({"🔍 Browse", "⏩ Next Profile"}))
 async def browse_next(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -295,6 +299,21 @@ async def execute_contact_request(user_id: int, state: FSMContext, message=None)
     if data['action'] == "send": text = "🤝 <b>User shared contact!</b>\n" + text
         
     await bot.send_message(target_prof['user_id'], text, reply_markup=contact_decision_kb(req_id, is_sending=(data['action']=="send")))
+
+# --- AD-HOC COMMANDS HANDLERS ---
+
+@router.message(Command("search"))
+async def search_cmd(message: types.Message):
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Please provide an ID. Example: `/search a1b2c3d4`", parse_mode="Markdown")
+        return
+    
+    profile = await Database.get_profile_by_uuid(args[1])
+    if profile:
+        await send_profile(message.chat.id, profile, profile_card_kb(profile['public_uuid']))
+    else:
+        await message.answer("❌ Profile not found.")
 
 # --- FALLBACK HANDLER ---
 @router.message()

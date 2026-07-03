@@ -14,11 +14,11 @@ def edit_info_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="✏️ Bio")], 
         [KeyboardButton(text="🌐 Public Contacts"), KeyboardButton(text="🔒 Private Contacts")],
-        [KeyboardButton(text="🏠 Main Menu")]
+        # Переименовано по вашему требованию
+        [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
 
 def edit_fsm_kb() -> ReplyKeyboardMarkup:
-    """Универсальная клавиатура для всех состояний изменения текста и медиа"""
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="❌ Cancel"), KeyboardButton(text="🗑️ Clear Field")]
     ], resize_keyboard=True)
@@ -27,21 +27,21 @@ def browse_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="💌 Request Contact"), KeyboardButton(text="🤝 Send Contact")],
         [KeyboardButton(text="⏩ Next Profile")],
-        [KeyboardButton(text="🏠 Main Menu")]
+        [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
 
 def manage_action_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="🌟 Set Active"), KeyboardButton(text="👁️ Toggle Vis")],
         [KeyboardButton(text="🔄 Regen ID"), KeyboardButton(text="🗑️ Delete")],
-        [KeyboardButton(text="🏠 Main Menu")]
+        [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
 
 def profiles_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="➕ Create Profile")],
         [KeyboardButton(text="🗑️ Delete All But Active")],
-        [KeyboardButton(text="🏠 Main Menu")]
+        [KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
 
 # --- INLINE KEYBOARDS (Кнопки под сообщениями) ---

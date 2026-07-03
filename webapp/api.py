@@ -8,7 +8,7 @@ from core.config import AVAILABLE_TAGS
 from core.security import validate_webapp_data
 from core.database import Database
 from bot.bot_setup import bot
-from bot.keyboards import main_menu_kb, profile_inline_kb  # Добавлен импорт profile_inline_kb
+from bot.keyboards import profile_inline_kb  # Оставляем только нужный импорт
 from bot.helpers import send_profile
 
 router = APIRouter()
@@ -49,8 +49,8 @@ async def update_tags(payload: WebAppPayload):
         
     active = await Database.get_active_profile(user_id)
     if active and active['public_uuid'] == payload.profile_id:
-        await bot.send_message(user_id, "✅ Settings updated!")
-        # Отправляем обновленную анкету с новыми inline-кнопками тегов/фильтров
+        # Убрано служебное текстовое сообщение "Settings updated!"
+        # Сразу отправляем обновленную анкету с новыми inline-кнопками тегов/фильтров
         await send_profile(user_id, active, profile_inline_kb(active['public_uuid']))
         
     return {"status": "ok"}
