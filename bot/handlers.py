@@ -246,13 +246,11 @@ async def browse_next(message: types.Message, state: FSMContext):
     if filters.get("exclude_tags"): and_clauses.append({"tags": {"$nin": filters["exclude_tags"]}})
     if filters.get("any_tags"): and_clauses.append({"tags": {"$in": filters["any_tags"]}})
         
-    # Attempt 1: Fetch unseen profiles
     pipeline = [{"$match": {"$and": and_clauses + [{"public_uuid": {"$nin": seen_uuids}}]}}, {"$sample": {"size": 1}}]
     cursor = Database.db.profiles.aggregate(pipeline)
     profiles = await cursor.to_list(length=1)
     
     if not profiles:
-        # Check if there are ANY profiles at all matching the filters (seen or unseen)
         pipeline_all = [{"$match": {"$and": and_clauses}}, {"$sample": {"size": 1}}]
         cursor_all = Database.db.profiles.aggregate(pipeline_all)
         all_profiles = await cursor_all.to_list(length=1)
@@ -260,7 +258,6 @@ async def browse_next(message: types.Message, state: FSMContext):
         if not all_profiles:
             return await message.answer("No matching profiles found!", reply_markup=main_menu_kb())
         else:
-            # Pool exhausted. Reset history and loop.
             await Database.clear_seen_profiles(user_id)
             await message.answer("🔄 You have viewed all matching profiles. Showing them a second time.")
             profiles = all_profiles
@@ -268,22 +265,19 @@ async def browse_next(message: types.Message, state: FSMContext):
     target = profiles[0]
     await Database.add_seen_profile(user_id, target['public_uuid'])
     
-    # 1. Provide the reply keyboard base
     await message.answer("🔍 Browsing...", reply_markup=browse_kb())
-    # 2. Render target profile natively with inline contact action buttons
     await send_profile(message.chat.id, target, browse_inline_kb(target['public_uuid']))
 
 @router.callback_query(F.data.startswith("req_") | F.data.startswith("reqmsg_") | F.data.startswith("send_") | F.data.startswith("sendmsg_"))
 async def init_contact_inline(callback: types.CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
-    action_type = parts[0]  # req, reqmsg, send, sendmsg
+    action_type = parts[0]
     target_uuid = parts[1]
     
     target_prof = await Database.get_profile_by_uuid(target_uuid)
     if not target_prof:
         return await callback.answer("Profile no longer exists.", show_alert=True)
         
-    # Block spam: Check if a request is already pending
     existing_req = await Database.db.contact_requests.find_one({
         "initiator_id": callback.from_user.id,
         "target_id": target_prof['user_id'],
@@ -305,19 +299,23 @@ async def init_contact_inline(callback: types.CallbackQuery, state: FSMContext):
     else:
         await callback.answer("Sending request...")
         await execute_contact_request(callback.from_user.id, state, message=None)
-        await callback.message.answer("✅ Request sent!", reply_markup=browse_kb())
+        await callback.message.answer(f"✅ Request sent to {target_uuid}!", reply_markup=browse_kb())
 
 @router.callback_query(F.data == "skip_req_msg", ContactRequest.waiting_for_message)
 async def skip_contact_msg(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    target_uuid = data['target_uuid']
     await callback.message.delete()
     await execute_contact_request(callback.from_user.id, state, message=None)
-    await callback.message.answer("✅ Request sent!", reply_markup=browse_kb())
+    await callback.message.answer(f"✅ Request sent to {target_uuid}!", reply_markup=browse_kb())
 
 @router.message(ContactRequest.waiting_for_message)
 async def capture_contact_msg(message: types.Message, state: FSMContext):
     if message.content_type != 'text': return await message.answer("Please send text only.")
+    data = await state.get_data()
+    target_uuid = data['target_uuid']
     await execute_contact_request(message.from_user.id, state, message)
-    await message.answer("✅ Request sent with message!", reply_markup=browse_kb())
+    await message.answer(f"✅ Request sent to {target_uuid} with message!", reply_markup=browse_kb())
 
 async def execute_contact_request(user_id: int, state: FSMContext, message=None):
     data = await state.get_data()
@@ -344,7 +342,6 @@ async def execute_contact_request(user_id: int, state: FSMContext, message=None)
     if msg_text: prefix += f"💬 <b>Message:</b> {html.escape(msg_text)}\n\n"
     if data['action'] == "send": prefix = "🤝 <b>A USER SHARED THEIR CONTACT!</b>\n" + prefix
         
-    # Render the FULL initiator profile to the target user with the decision keyboard
     await send_profile(target_prof['user_id'], initiator, contact_decision_kb(req_id, is_sending=(data['action']=="send")), custom_prefix=prefix)
     await state.clear()
 
@@ -370,7 +367,6 @@ async def contact_decisions(callback: types.CallbackQuery):
         await Database.db.contact_requests.update_one({"req_id": req_id}, {"$set": {"status": "accepted"}})
         target_prof = await Database.get_active_profile(callback.from_user.id)
         
-        # Build target's contact string (Fallback to DB username, or raw Telegram link)
         contact_str = target_prof.get('public_contact', '')
         if not contact_str: contact_str = target_prof.get('private_contact', '')
         if not contact_str:
@@ -385,7 +381,6 @@ async def contact_decisions(callback: types.CallbackQuery):
     elif decision == "counter":
         await Database.db.contact_requests.update_one({"req_id": req_id}, {"$set": {"status": "countered"}})
         
-        # We simulate a reverse 'req' action automatically
         new_req_id = uuid.uuid4().hex
         counter_doc = {
             "req_id": new_req_id,

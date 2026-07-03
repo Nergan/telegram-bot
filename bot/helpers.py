@@ -10,7 +10,6 @@ def truncate(text: str, limit: int = 4000) -> str:
     return text if len(text) <= limit else text[:limit-3] + "..."
 
 async def send_profile(chat_id: int, profile: dict, kb, custom_prefix: str = ""):
-    """Intelligently groups Text + Media to respect Telegram API limits while attaching keyboards natively."""
     await bot.send_chat_action(chat_id, "typing")
     
     text = f"{custom_prefix}<b>ID:</b> <code>{profile['public_uuid']}</code>\n\n"
@@ -24,12 +23,10 @@ async def send_profile(chat_id: int, profile: dict, kb, custom_prefix: str = "")
 
     try:
         if not media:
-            # 0 Media: Send text directly with keyboard
             final_text = truncate(text, 4000)
             await bot.send_message(chat_id, final_text, reply_markup=kb, link_preview_options=opts)
             
         elif len(media) == 1:
-            # 1 Media: Send media with text as caption and keyboard attached
             final_text = truncate(text, 1024)
             m = media[0]
             if m['type'] == 'photo': await bot.send_photo(chat_id, m['file_id'], caption=final_text, reply_markup=kb)
@@ -40,16 +37,15 @@ async def send_profile(chat_id: int, profile: dict, kb, custom_prefix: str = "")
             elif m['type'] == 'voice': await bot.send_voice(chat_id, m['file_id'], caption=final_text, reply_markup=kb)
             
         else:
-            # 2+ Media: Telegram forbids keyboards on MediaGroups. 
-            # We send the album first (no caption), then a standard text message with the keyboard.
-            final_text = truncate(text, 4000)
+            final_text = truncate(text, 1024)
             media_group = []
-            for m in media[:10]:
-                if m['type'] == 'photo': media_group.append(InputMediaPhoto(media=m['file_id']))
-                elif m['type'] == 'video': media_group.append(InputMediaVideo(media=m['file_id']))
+            for i, m in enumerate(media[:10]):
+                cap = final_text if i == 0 else None
+                if m['type'] == 'photo': media_group.append(InputMediaPhoto(media=m['file_id'], caption=cap))
+                elif m['type'] == 'video': media_group.append(InputMediaVideo(media=m['file_id'], caption=cap))
             
             await bot.send_media_group(chat_id, media=media_group)
-            await bot.send_message(chat_id, final_text, reply_markup=kb, link_preview_options=opts)
+            await bot.send_message(chat_id, "⚙️ Options:", reply_markup=kb)
             
     except Exception as e:
         logger.error(f"Failed to render profile {profile['public_uuid']}: {e}")
