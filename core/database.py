@@ -131,6 +131,10 @@ class Database:
     async def delete_all_but_active(cls, user_id: int):
         await cls.db.profiles.delete_many({"user_id": user_id, "is_active": False})
         
+    @classmethod
+    async def get_pool_size(cls, user_id: int) -> int:
+        return await cls.db.profiles.count_documents({"user_id": {"$ne": user_id}, "is_active": True})
+        
     # --- Session Tracking ---
     @classmethod
     async def add_seen_profile(cls, user_id: int, seen_uuid: str):
@@ -152,15 +156,16 @@ class Database:
     async def get_seen_profiles(cls, user_id: int) -> list:
         session = await cls.db.search_sessions.find_one({"user_id": user_id})
         return session.get("seen_uuids", []) if session else []
-    
+
     @classmethod
     async def get_requests_counts(cls, user_id: int) -> tuple[int, int]:
         sent = await cls.db.contact_requests.count_documents({
             "initiator_id": user_id, 
-            "status": {"$in": ["pending", "counter_pending"]}
+            "status": "pending"
         })
         recv = await cls.db.contact_requests.count_documents({
             "target_id": user_id, 
-            "status": {"$in": ["pending", "counter_pending"]}
+            "status": "pending"
         })
+        logger.info(f"Pending requests count for {user_id}: sent={sent}, recv={recv}")
         return sent, recv

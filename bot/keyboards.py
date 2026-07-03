@@ -3,10 +3,9 @@ from core.config import WEBHOOK_URL
 
 # --- REPLY KEYBOARDS ---
 
-def main_menu_kb() -> ReplyKeyboardMarkup:
-    """Главное меню (добавлена кнопка View Active Profile на первую клавиатуру)"""
+def main_menu_kb(pool_size: int = 0) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🔍 Browse")],
+        [KeyboardButton(text=f"🔍 Browse ({pool_size})")],
         [KeyboardButton(text="📝 Edit Active Profile")],
         [KeyboardButton(text="👥 Profiles"), KeyboardButton(text="🏠 View Active Profile")]
     ], resize_keyboard=True)
@@ -65,24 +64,30 @@ def profile_inline_kb(profile_uuid: str, sent_count: int = 0, recv_count: int = 
     ])
 
 def browse_inline_kb(target_uuid: str, has_self_private: bool = True, has_target_private: bool = True) -> InlineKeyboardMarkup:
+    buttons = []
+    
+    # Mutual Exchange Request Row
     if not has_self_private:
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔒 Add Private Contact to Interact", callback_data="no_private_alert")]
+        buttons.append([
+            InlineKeyboardButton(text="🔒 Request (Add your private info)", callback_data="no_private_alert")
         ])
-    if not has_target_private:
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔒 User has no private contacts", callback_data="target_no_private_alert")]
+    elif not has_target_private:
+        buttons.append([
+            InlineKeyboardButton(text="🔒 Request (They lack private info)", callback_data="target_no_private_alert")
         ])
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
+    else:
+        buttons.append([
             InlineKeyboardButton(text="💌 Request", callback_data=f"req_{target_uuid}"),
             InlineKeyboardButton(text="💌 Req + Msg", callback_data=f"reqmsg_{target_uuid}")
-        ],
-        [
-            InlineKeyboardButton(text="🤝 Send Contact", callback_data=f"send_{target_uuid}"),
-            InlineKeyboardButton(text="🤝 Send + Msg", callback_data=f"sendmsg_{target_uuid}")
-        ]
+        ])
+        
+    # Unilateral Send Row
+    buttons.append([
+        InlineKeyboardButton(text="🤝 Send Contact", callback_data=f"send_{target_uuid}"),
+        InlineKeyboardButton(text="🤝 Send + Msg", callback_data=f"sendmsg_{target_uuid}")
     ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def manage_contacts_inline_kb(contacts: list) -> InlineKeyboardMarkup:
     keyboard = []
@@ -101,7 +106,7 @@ def manage_contacts_inline_kb(contacts: list) -> InlineKeyboardMarkup:
     keyboard.append([InlineKeyboardButton(text="➕ Add New Contact", callback_data="add_contact_fsm")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def contact_share_selection_kb(private_contacts: list, selected_ids: list) -> InlineKeyboardMarkup:
+def contact_share_selection_kb(private_contacts: list, selected_ids: list, action: str) -> InlineKeyboardMarkup:
     keyboard = []
     for c in private_contacts:
         cid = c["id"]
@@ -113,31 +118,22 @@ def contact_share_selection_kb(private_contacts: list, selected_ids: list) -> In
             InlineKeyboardButton(text=f"{prefix}{val_truncated}", callback_data=f"selcon_{cid}")
         ])
         
-    keyboard.append([InlineKeyboardButton(text="📤 Confirm & Share", callback_data="confirm_share_contacts")])
+    if action == "send":
+        btn_text = "📤 Send Profile Only" if not selected_ids else "📤 Send Profile & Contacts"
+    elif action == "req":
+        btn_text = "📤 Send Mutual Request"
+    else:
+        btn_text = "📤 Confirm & Exchange"
+        
+    keyboard.append([InlineKeyboardButton(text=btn_text, callback_data="confirm_share_contacts")])
     keyboard.append([InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_share_contacts")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def skip_message_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⏭️ Skip Message & Send", callback_data="skip_req_msg")]])
 
-def contact_decision_kb(req_id: str, is_sending: bool = False, can_counter: bool = True) -> InlineKeyboardMarkup:
-    buttons = []
-    if is_sending:
-        buttons.append([InlineKeyboardButton(text="🤝 Share Mine Too", callback_data=f"accept_{req_id}")])
-    else:
-        row = [InlineKeyboardButton(text="✅ Share Contact", callback_data=f"accept_{req_id}")]
-        if can_counter:
-            row.append(InlineKeyboardButton(text="🔄 Ask For Theirs", callback_data=f"counter_{req_id}"))
-        else:
-            row.append(InlineKeyboardButton(text="🔒 Ask For Theirs (Disabled)", callback_data="disabled_counter_alert"))
-        buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="❌ Hide/Decline", callback_data=f"decline_{req_id}")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-def mutual_exchange_kb(req_id: str) -> InlineKeyboardMarkup:
+def contact_decision_kb(req_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Agree & Select Contacts", callback_data=f"agree_exchange_{req_id}"),
-            InlineKeyboardButton(text="❌ Decline", callback_data=f"decline_{req_id}")
-        ]
+        [InlineKeyboardButton(text="✅ Share Contacts", callback_data=f"accept_{req_id}")],
+        [InlineKeyboardButton(text="❌ Decline", callback_data=f"decline_{req_id}")]
     ])

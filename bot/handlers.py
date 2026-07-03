@@ -20,8 +20,11 @@ async def show_main_menu(message: types.Message, state: FSMContext):
     await state.clear()
     logger.info(f"User {message.from_user.id} accessed main menu.")
     active_profile = await Database.get_or_create_active_profile(message.from_user.id, message.from_user.username)
+    
+    pool_size = await Database.get_pool_size(message.from_user.id)
     sent_c, recv_c = await Database.get_requests_counts(message.from_user.id)
-    await message.answer("🏠 View Active Profile 🏠", reply_markup=main_menu_kb())
+    
+    await message.answer("🏠 View Active Profile 🏠", reply_markup=main_menu_kb(pool_size))
     await send_profile(message.chat.id, active_profile, profile_inline_kb(active_profile['public_uuid'], sent_c, recv_c))
 
 # --- FSM CAPTURE ---
@@ -84,10 +87,8 @@ async def capture_new_contact(message: types.Message, state: FSMContext):
     
     if len(contact_val) > 100:
         return await message.answer("❌ Contact details must be 100 characters or less. Please try again:")
-        
     if "\n" in contact_val or "\r" in contact_val:
         return await message.answer("❌ Contact details must be a single line (no line breaks). Please try again:")
-        
     if len(contact_val) < 3:
         return await message.answer("❌ Contact details are too short. Please try again:")
     
@@ -382,7 +383,8 @@ async def browse_next(message: types.Message, state: FSMContext):
         all_profiles = await cursor_all.to_list(length=1)
         
         if not all_profiles:
-            return await message.answer("No matching profiles found!", reply_markup=main_menu_kb())
+            pool_size = await Database.get_pool_size(user_id)
+            return await message.answer("No matching profiles found!", reply_markup=main_menu_kb(pool_size))
         else:
             await Database.clear_seen_profiles(user_id)
             await message.answer("🔄 You have viewed all matching profiles. Showing them a second time.")
@@ -391,6 +393,7 @@ async def browse_next(message: types.Message, state: FSMContext):
     target = profiles[0]
     await Database.add_seen_profile(user_id, target['public_uuid'])
     
+    pool_size = await Database.get_pool_size(user_id)
     await message.answer("🔍 Browsing...", reply_markup=browse_kb())
     
     private_contacts = [c for c in active.get("contacts", []) if not c.get("is_public")]
@@ -404,8 +407,7 @@ async def browse_next(message: types.Message, state: FSMContext):
 @router.callback_query(F.data == "no_private_alert")
 async def no_private_alert_cb(callback: types.CallbackQuery):
     await callback.answer(
-        "⚠️ You have no private contacts to share!\n"
-        "Please add a private contact under '📝 Edit Active Profile' -> '📞 Manage Contacts' first.",
+        "⚠️ You must add at least one private contact via 'Manage Contacts' before you can initiate a mutual exchange request.",
         show_alert=True
     )
 
@@ -426,17 +428,18 @@ async def init_contact_inline(callback: types.CallbackQuery, state: FSMContext):
     if not target_prof:
         return await callback.answer("Profile no longer exists.", show_alert=True)
         
-    existing_req = await Database.db.contact_requests.find_one({
-        "initiator_id": callback.from_user.id,
-        "target_id": target_prof['user_id'],
-        "status": "pending"
-    })
-    if existing_req:
-        return await callback.answer("⏳ You already have a pending request with this user.", show_alert=True)
-        
     is_send = action_type.startswith("send")
     has_msg = action_type.endswith("msg")
     db_action = "send" if is_send else "req"
+    
+    if db_action == "req":
+        existing_req = await Database.db.contact_requests.find_one({
+            "initiator_id": callback.from_user.id,
+            "target_id": target_prof['user_id'],
+            "status": "pending"
+        })
+        if existing_req:
+            return await callback.answer("⏳ You already have a pending request with this user.", show_alert=True)
     
     await state.update_data(
         target_uuid=target_uuid, 
@@ -449,12 +452,7 @@ async def init_contact_inline(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.answer("Attach a message (or click skip):", reply_markup=skip_message_kb())
         await callback.answer()
     else:
-        if db_action == "send":
-            await show_contact_selection(callback, state)
-        else:
-            await callback.answer("Sending request...")
-            await execute_contact_request(callback.from_user.id, state, message=None)
-            await callback.message.answer(f"✅ Request sent to <code>{target_uuid}</code>!", reply_markup=browse_kb())
+        await show_contact_selection(callback, state)
 
 async def show_contact_selection(event: types.CallbackQuery | types.Message, state: FSMContext):
     user_id = event.from_user.id
@@ -462,9 +460,12 @@ async def show_contact_selection(event: types.CallbackQuery | types.Message, sta
     await Database.sync_telegram_username(active_prof, event.from_user.username)
     active_prof = await Database.get_active_profile(user_id)
     
+    data = await state.get_data()
+    action = data.get("action")
+    
     private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
     
-    if not private_contacts:
+    if not private_contacts and action == "req":
         await state.clear()
         msg_err = "❌ You have no private contacts to share. Please add one first."
         if isinstance(event, types.CallbackQuery):
@@ -473,15 +474,18 @@ async def show_contact_selection(event: types.CallbackQuery | types.Message, sta
             await event.answer(msg_err)
         return
         
-    data = await state.get_data()
     selected_ids = data.get("selected_contact_ids", [])
-    if not selected_ids:
+    if not selected_ids and private_contacts:
         selected_ids = [private_contacts[0]["id"]]
         await state.update_data(selected_contact_ids=selected_ids)
         
-    kb = contact_share_selection_kb(private_contacts, selected_ids)
-    text = "🔒 <b>Select Private Contacts to Share</b>\nChoose which of your private contact details you want to share:"
+    kb = contact_share_selection_kb(private_contacts, selected_ids, action)
     
+    if action == "req":
+        text = "🔒 <b>Select Private Contacts for Mutual Exchange</b>\nChoose which private contacts you will share if they agree to the exchange:"
+    else:
+        text = "🔒 <b>Select Private Contacts to Send (Optional)</b>\nChoose private contacts to send alongside your profile, or send the profile only:"
+        
     await state.set_state(ContactRequest.selecting_contacts)
     if isinstance(event, types.CallbackQuery):
         await event.message.answer(text, reply_markup=kb)
@@ -493,11 +497,12 @@ async def show_contact_selection(event: types.CallbackQuery | types.Message, sta
 async def toggle_share_selection(callback: types.CallbackQuery, state: FSMContext):
     cid = callback.data.split("_")[1]
     data = await state.get_data()
+    action = data.get("action")
     selected_ids = data.get("selected_contact_ids", [])
     
     if cid in selected_ids:
-        if len(selected_ids) <= 1:
-            return await callback.answer("⚠️ You must select at least one contact to share.", show_alert=True)
+        if action == "req" and len(selected_ids) <= 1:
+            return await callback.answer("⚠️ You must select at least one contact for a mutual request.", show_alert=True)
         selected_ids.remove(cid)
     else:
         selected_ids.append(cid)
@@ -507,94 +512,27 @@ async def toggle_share_selection(callback: types.CallbackQuery, state: FSMContex
     active_prof = await Database.get_active_profile(callback.from_user.id)
     private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
     await callback.message.edit_reply_markup(
-        reply_markup=contact_share_selection_kb(private_contacts, selected_ids)
+        reply_markup=contact_share_selection_kb(private_contacts, selected_ids, action)
     )
     await callback.answer()
 
 @router.callback_query(F.data == "confirm_share_contacts", ContactRequest.selecting_contacts)
 async def confirm_share_contacts_cb(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
+    action = data.get("action")
     accepting_req_id = data.get("accepting_req_id")
-    countering_req_id = data.get("countering_req_id")
-    agreeing_exchange_req_id = data.get("agreeing_exchange_req_id")
     
     selected_ids = data.get("selected_contact_ids", [])
     active_prof = await Database.get_active_profile(callback.from_user.id)
     shared_contacts = [c["value"] for c in active_prof.get("contacts", []) if c["id"] in selected_ids]
     
-    if not shared_contacts:
-        return await callback.answer("⚠️ You must select at least one contact to share.", show_alert=True)
+    if action == "req" and not shared_contacts:
+        return await callback.answer("⚠️ You must select at least one contact for a mutual request.", show_alert=True)
         
-    if countering_req_id:
-        req = await Database.db.contact_requests.find_one({"req_id": countering_req_id})
-        if not req or req['status'] != 'pending':
-            await state.clear()
-            return await callback.answer("This request has expired or was already handled.", show_alert=True)
+    if accepting_req_id:
+        if not shared_contacts:
+            return await callback.answer("⚠️ You must select at least one contact to exchange.", show_alert=True)
             
-        await Database.db.contact_requests.update_one(
-            {"req_id": countering_req_id}, 
-            {"$set": {
-                "status": "counter_pending",
-                "counter_shared_contacts": shared_contacts
-            }}
-        )
-        
-        b_profile = await Database.get_active_profile(callback.from_user.id)
-        offered_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
-        
-        prefix = (
-            f"🔄 <b>MUTUAL EXCHANGE REQUEST!</b>\n"
-            f"The user wants to exchange private contacts with you!\n"
-            f"If you agree, you will receive these contacts of theirs:\n\n"
-            f"{offered_contacts_text}\n\n"
-            f"Please choose your option below:"
-        )
-        
-        await send_profile(
-            req['initiator_id'], 
-            b_profile, 
-            mutual_exchange_kb(countering_req_id), 
-            custom_prefix=prefix
-        )
-        
-        await callback.message.answer("✅ Mutual exchange request sent! Awaiting response from the other user.", reply_markup=browse_kb())
-        await callback.message.delete()
-        await state.clear()
-        
-    elif agreeing_exchange_req_id:
-        req = await Database.db.contact_requests.find_one({"req_id": agreeing_exchange_req_id})
-        if not req or req['status'] != 'counter_pending':
-            await state.clear()
-            return await callback.answer("This request has expired or was already handled.", show_alert=True)
-            
-        await Database.db.contact_requests.update_one(
-            {"req_id": agreeing_exchange_req_id}, 
-            {"$set": {
-                "status": "accepted",
-                "initiator_shared_contacts": shared_contacts
-            }}
-        )
-        
-        b_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in req['counter_shared_contacts'])
-        a_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
-        
-        b_profile = await Database.get_active_profile(req['target_id'])
-        await send_profile(callback.from_user.id, b_profile, kb=None, custom_prefix="👤 <b>Exchanged Profile:</b>\n\n")
-        await callback.message.answer(
-            f"🤝 <b>Mutual Exchange Complete!</b>\nHere are the contact details they shared with you:\n\n{b_contacts_text}"
-        )
-        
-        a_profile = await Database.get_active_profile(callback.from_user.id)
-        await send_profile(req['target_id'], a_profile, kb=None, custom_prefix="👤 <b>Exchanged Profile:</b>\n\n")
-        await bot.send_message(
-            req['target_id'], 
-            f"🤝 <b>Mutual Exchange Complete!</b>\nHere are the contact details they shared with you:\n\n{a_contacts_text}"
-        )
-        
-        await callback.message.delete()
-        await state.clear()
-        
-    elif accepting_req_id:
         req = await Database.db.contact_requests.find_one({"req_id": accepting_req_id})
         if not req or req['status'] != 'pending':
             await state.clear()
@@ -608,10 +546,10 @@ async def confirm_share_contacts_cb(callback: types.CallbackQuery, state: FSMCon
             }}
         )
         
-        contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
-        
         b_profile = await Database.get_active_profile(callback.from_user.id)
         await send_profile(req['initiator_id'], b_profile, kb=None, custom_prefix="👤 <b>Exchanged Profile:</b>\n\n")
+        
+        contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
         await bot.send_message(
             req['initiator_id'], 
             f"✅ <b>Request Accepted!</b>\nThe user shared their contact details:\n\n{contacts_text}"
@@ -619,14 +557,10 @@ async def confirm_share_contacts_cb(callback: types.CallbackQuery, state: FSMCon
         
         initiator_shared = req.get("shared_contacts", [])
         if initiator_shared:
-            a_profile = await Database.get_active_profile(req['initiator_id'])
-            await send_profile(callback.from_user.id, a_profile, kb=None, custom_prefix="👤 <b>Exchanged Profile:</b>\n\n")
             init_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in initiator_shared)
             await callback.message.answer(
-                f"🤝 <b>You shared your contact details.</b>\nHere are the contact details they shared with you:\n\n{init_contacts_text}"
+                f"🤝 <b>Mutual Exchange Complete!</b>\nHere are the contact details of the user you accepted:\n\n{init_contacts_text}"
             )
-        else:
-            await callback.message.answer("✅ You accepted the request. They received your contact info.")
             
         await callback.message.delete()
         await state.clear()
@@ -635,8 +569,10 @@ async def confirm_share_contacts_cb(callback: types.CallbackQuery, state: FSMCon
         target_uuid = data.get("target_uuid")
         await state.update_data(shared_contacts=shared_contacts)
         await execute_contact_request(callback.from_user.id, state, message=None)
+        
+        msg = f"✅ Message and contacts sent to <code>{target_uuid}</code>!" if action == "send" else f"✅ Mutual request sent to <code>{target_uuid}</code>!"
         await callback.message.delete()
-        await callback.message.answer(f"✅ Contact details shared with <code>{target_uuid}</code>!", reply_markup=browse_kb())
+        await callback.message.answer(msg, reply_markup=browse_kb())
 
 @router.callback_query(F.data == "cancel_share_contacts", ContactRequest.selecting_contacts)
 async def cancel_share_contacts_cb(callback: types.CallbackQuery, state: FSMContext):
@@ -647,81 +583,72 @@ async def cancel_share_contacts_cb(callback: types.CallbackQuery, state: FSMCont
 
 @router.callback_query(F.data == "skip_req_msg", ContactRequest.waiting_for_message)
 async def skip_contact_msg(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    action = data.get("action")
-    if action == "send":
-        await show_contact_selection(callback, state)
-    else:
-        target_uuid = data['target_uuid']
-        await callback.message.delete()
-        await execute_contact_request(callback.from_user.id, state, message=None)
-        await callback.message.answer(f"✅ Request sent to <code>{target_uuid}</code>!", reply_markup=browse_kb())
+    await show_contact_selection(callback, state)
 
 @router.message(ContactRequest.waiting_for_message)
 async def capture_contact_msg(message: types.Message, state: FSMContext):
     if message.content_type != 'text': return await message.answer("Please send text only.")
-    data = await state.get_data()
-    action = data.get("action")
-    
     await state.update_data(message_text=message.text)
-    
-    if action == "send":
-        await show_contact_selection(message, state)
-    else:
-        target_uuid = data['target_uuid']
-        await execute_contact_request(message.from_user.id, state, message)
-        await message.answer(f"✅ Request sent to <code>{target_uuid}</code> with message!", reply_markup=browse_kb())
+    await show_contact_selection(message, state)
 
 async def execute_contact_request(user_id: int, state: FSMContext, message=None):
     data = await state.get_data()
     target_prof = await Database.get_profile_by_uuid(data['target_uuid'])
     if not target_prof: return
     
-    req_id = uuid.uuid4().hex
+    action = data['action']
     msg_text = message.text if message else data.get("message_text")
     shared_contacts = data.get("shared_contacts", [])
-    
-    req_doc = {
-        "req_id": req_id, 
-        "initiator_id": user_id, 
-        "target_id": target_prof['user_id'], 
-        "action": data['action'], 
-        "status": "pending", 
-        "message": msg_text,
-        "shared_contacts": shared_contacts
-    }
-    await Database.db.contact_requests.insert_one(req_doc)
-    logger.info(f"Contact Request {req_id} initiated by {user_id} to {target_prof['user_id']}")
-    
     initiator = await Database.get_active_profile(user_id)
     
-    prefix = f"🔔 <b>NEW CONTACT REQUEST!</b>\n"
-    if msg_text: prefix += f"💬 <b>Message:</b> {html.escape(msg_text)}\n\n"
-    if data['action'] == "send":
-        prefix = f"🤝 <b>A USER OFFERED TO EXCHANGE CONTACTS!</b>\nThey have pre-selected private contacts to share. To view them, you must agree to share yours in exchange!\n\n" + prefix
+    if action == "send":
+        # Unilateral delivery (Not tracked in contact_requests state machine)
+        prefix = f"🔔 <b>A USER SHARED THEIR PROFILE WITH YOU!</b>\n"
+        if msg_text: prefix += f"💬 <b>Message:</b> {html.escape(msg_text)}\n\n"
+        if shared_contacts:
+            contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
+            prefix = f"🤝 <b>A USER SHARED CONTACTS!</b>\nShared details:\n{contacts_text}\n\n" + prefix
+        else:
+            prefix += "\n"
         
-    target_private_contacts = [c for c in target_prof.get("contacts", []) if not c.get("is_public")]
-    has_target_private = len(target_private_contacts) > 0
+        await send_profile(target_prof['user_id'], initiator, kb=None, custom_prefix=prefix)
     
-    await send_profile(target_prof['user_id'], initiator, contact_decision_kb(req_id, is_sending=(data['action']=="send"), can_counter=has_target_private), custom_prefix=prefix)
+    else:
+        # Mutual Exchange Request
+        req_id = uuid.uuid4().hex
+        req_doc = {
+            "req_id": req_id, 
+            "initiator_id": user_id, 
+            "target_id": target_prof['user_id'], 
+            "action": action, 
+            "status": "pending", 
+            "message": msg_text,
+            "shared_contacts": shared_contacts
+        }
+        await Database.db.contact_requests.insert_one(req_doc)
+        logger.info(f"Mutual Contact Request {req_id} initiated by {user_id} to {target_prof['user_id']}")
+        
+        prefix = f"🔔 <b>NEW CONTACT EXCHANGE REQUEST!</b>\n"
+        if msg_text: prefix += f"💬 <b>Message:</b> {html.escape(msg_text)}\n\n"
+        prefix += "They want to exchange private contacts simultaneously. Accept to select yours and view theirs.\n\n"
+        
+        await send_profile(target_prof['user_id'], initiator, contact_decision_kb(req_id), custom_prefix=prefix)
+        
     await state.clear()
 
 # --- CONTACT DECISION HANDLERS ---
 
-@router.callback_query(F.data.startswith("accept_") | F.data.startswith("decline_") | F.data.startswith("counter_"))
+@router.callback_query(F.data.startswith("accept_") | F.data.startswith("decline_"))
 async def contact_decisions(callback: types.CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
     decision = parts[0]
     req_id = parts[1]
     
     req = await Database.db.contact_requests.find_one({"req_id": req_id})
-    if not req:
+    if not req or req['status'] != 'pending':
         return await callback.answer("This request has expired or was already handled.", show_alert=True)
         
     if decision == "decline":
-        if req['status'] not in ['pending', 'counter_pending']:
-            return await callback.answer("This request has expired or was already handled.", show_alert=True)
-            
         await Database.db.contact_requests.update_one({"req_id": req_id}, {"$set": {"status": "declined"}})
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.reply("❌ Request declined and hidden.")
@@ -729,98 +656,25 @@ async def contact_decisions(callback: types.CallbackQuery, state: FSMContext):
         return await callback.answer()
         
     elif decision == "accept":
-        if req['status'] != 'pending':
-            return await callback.answer("This request has expired or was already handled.", show_alert=True)
-            
         active_prof = await Database.get_active_profile(callback.from_user.id)
-        await Database.sync_telegram_username(active_prof, callback.from_user.username)
-        active_prof = await Database.get_active_profile(callback.from_user.id)
-        
         private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
         if not private_contacts:
-            return await callback.answer("⚠️ You must set at least one private contact under '📝 Edit Active Profile' -> '📞 Manage Contacts' first.", show_alert=True)
+            return await callback.answer("⚠️ You must set at least one private contact under '📝 Edit Active Profile' -> '📞 Manage Contacts' before accepting a mutual request.", show_alert=True)
             
         await state.update_data(
             accepting_req_id=req_id,
+            action="accept",
             selected_contact_ids=[private_contacts[0]["id"]]
         )
         await state.set_state(ContactRequest.selecting_contacts)
         
-        kb = contact_share_selection_kb(private_contacts, [private_contacts[0]["id"]])
+        kb = contact_share_selection_kb(private_contacts, [private_contacts[0]["id"]], action="accept")
         await callback.message.answer(
-            "🔒 <b>Select Private Contacts to Share</b>\n"
-            "Choose which of your private contact details you want to share with this user:",
+            "🔒 <b>Select Private Contacts to Exchange</b>\n"
+            "Choose which of your private contact details you want to share with this user to complete the mutual exchange:",
             reply_markup=kb
         )
         await callback.answer()
-        
-    elif decision == "counter":
-        if req['status'] != 'pending':
-            return await callback.answer("This request has expired or was already handled.", show_alert=True)
-            
-        active_prof = await Database.get_active_profile(callback.from_user.id)
-        private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
-        if not private_contacts:
-            return await callback.answer("⚠️ You have no private contacts to share. Please add one first under Manage Contacts.", show_alert=True)
-            
-        initiator_prof = await Database.get_active_profile(req['initiator_id'])
-        if not initiator_prof:
-            return await callback.answer("⚠️ The initiator's profile no longer exists.", show_alert=True)
-            
-        initiator_private = [c for c in initiator_prof.get("contacts", []) if not c.get("is_public")]
-        if not initiator_private:
-            return await callback.answer("⚠️ The other user no longer has private contacts to exchange.", show_alert=True)
-            
-        await state.update_data(
-            countering_req_id=req_id,
-            selected_contact_ids=[private_contacts[0]["id"]]
-        )
-        await state.set_state(ContactRequest.selecting_contacts)
-        
-        kb = contact_share_selection_kb(private_contacts, [private_contacts[0]["id"]])
-        await callback.message.answer(
-            "🔒 <b>Select Your Private Contacts to Exchange</b>\n"
-            "Choose which of your private contact details you want to share if they agree to the mutual exchange:",
-            reply_markup=kb
-        )
-        await callback.answer()
-
-@router.callback_query(F.data == "disabled_counter_alert")
-async def disabled_counter_alert_cb(callback: types.CallbackQuery):
-    await callback.answer(
-        "⚠️ You cannot use mutual exchange because your profile has no private contacts to offer.\n"
-        "Please add at least one private contact under 'Manage Contacts' first.",
-        show_alert=True
-    )
-
-@router.callback_query(F.data.startswith("agree_exchange_"))
-async def agree_exchange_cb(callback: types.CallbackQuery, state: FSMContext):
-    req_id = callback.data.split("_")[2]
-    req = await Database.db.contact_requests.find_one({"req_id": req_id})
-    if not req or req['status'] != 'counter_pending':
-        return await callback.answer("This request has expired or was already handled.", show_alert=True)
-        
-    active_prof = await Database.get_active_profile(callback.from_user.id)
-    await Database.sync_telegram_username(active_prof, callback.from_user.username)
-    active_prof = await Database.get_active_profile(callback.from_user.id)
-    
-    private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
-    if not private_contacts:
-        return await callback.answer("⚠️ You must set at least one private contact under '📝 Edit Active Profile' -> '📞 Manage Contacts' first.", show_alert=True)
-        
-    await state.update_data(
-        agreeing_exchange_req_id=req_id,
-        selected_contact_ids=[private_contacts[0]["id"]]
-    )
-    await state.set_state(ContactRequest.selecting_contacts)
-    
-    kb = contact_share_selection_kb(private_contacts, [private_contacts[0]["id"]])
-    await callback.message.answer(
-        "🔒 <b>Select Your Private Contacts to Share in Response</b>\n"
-        "Choose which of your private contact details you want to share with this user to complete the exchange:",
-        reply_markup=kb
-    )
-    await callback.answer()
 
 # --- FALLBACK HANDLER ---
 @router.message()
@@ -831,6 +685,7 @@ async def unhandled_message(message: types.Message, state: FSMContext):
     else:
         active = await Database.get_active_profile(message.from_user.id)
         if active:
-            await message.answer("🤷 Unrecognized command. Please use the menu buttons below.", reply_markup=main_menu_kb())
+            pool_size = await Database.get_pool_size(message.from_user.id)
+            await message.answer("🤷 Unrecognized command. Please use the menu buttons below.", reply_markup=main_menu_kb(pool_size))
         else:
             await message.answer("🤷 Send /start to begin.")
