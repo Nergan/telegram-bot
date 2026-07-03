@@ -1,6 +1,7 @@
 import uuid
 import html
 import logging
+import traceback
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from bot.bot_setup import bot
@@ -21,69 +22,88 @@ logger = logging.getLogger(__name__)
 
 @router.message(F.text.startswith("🔍 Browse") | (F.text == "⏩ Next Profile"))
 async def browse_next(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    active = await Database.get_active_profile(user_id)
-    await Database.sync_telegram_username(active, message.from_user.username)
-    active = await Database.get_active_profile(user_id)
-    
-    seen_uuids = await Database.get_seen_profiles(user_id)
-    
-    filters = active.get("filters", {})
-    and_clauses = [{"user_id": {"$ne": user_id}}, {"is_active": True}]
-    if filters.get("require_tags"): 
-        and_clauses.append({"tags": {"$all": filters["require_tags"]}})
-    if filters.get("exclude_tags"): 
-        and_clauses.append({"tags": {"$nin": filters["exclude_tags"]}})
-    if filters.get("any_tags"): 
-        and_clauses.append({"tags": {"$in": filters["any_tags"]}})
+    try:
+        user_id = message.from_user.id
+        active = await Database.get_active_profile(user_id)
+        if not active:
+            return await message.answer("❌ You must create and activate a profile before browsing others!")
+            
+        await Database.sync_telegram_username(active, message.from_user.username)
+        active = await Database.get_active_profile(user_id)
         
-    pipeline = [{"$match": {"$and": and_clauses + [{"public_uuid": {"$nin": seen_uuids}}]}}, {"$sample": {"size": 1}}]
-    cursor = Database.db.profiles.aggregate(pipeline)
-    profiles = await cursor.to_list(length=1)
-    
-    if not profiles:
-        pipeline_all = [{"$match": {"$and": and_clauses}}, {"$sample": {"size": 1}}]
-        cursor_all = Database.db.profiles.aggregate(pipeline_all)
-        all_profiles = await cursor_all.to_list(length=1)
+        seen_uuids = await Database.get_seen_profiles(user_id)
         
-        if not all_profiles:
-            pool_size = await Database.get_pool_size(user_id)
-            return await message.answer("No matching profiles found!", reply_markup=main_menu_kb(pool_size))
-        else:
-            await Database.clear_seen_profiles(user_id)
-            await message.answer("🔄 You have viewed all matching profiles. Showing them a second time.")
-            profiles = all_profiles
+        filters = active.get("filters", {})
+        and_clauses = [{"user_id": {"$ne": user_id}}, {"is_active": True}]
+        if filters.get("require_tags"): 
+            and_clauses.append({"tags": {"$all": filters["require_tags"]}})
+        if filters.get("exclude_tags"): 
+            and_clauses.append({"tags": {"$nin": filters["exclude_tags"]}})
+        if filters.get("any_tags"): 
+            and_clauses.append({"tags": {"$in": filters["any_tags"]}})
+            
+        pipeline = [{"$match": {"$and": and_clauses + [{"public_uuid": {"$nin": seen_uuids}}]}}, {"$sample": {"size": 1}}]
+        cursor = Database.db.profiles.aggregate(pipeline)
+        profiles = await cursor.to_list(length=1)
+        
+        if not profiles:
+            pipeline_all = [{"$match": {"$and": and_clauses}}, {"$sample": {"size": 1}}]
+            cursor_all = Database.db.profiles.aggregate(pipeline_all)
+            all_profiles = await cursor_all.to_list(length=1)
+            
+            if not all_profiles:
+                pool_size = await Database.get_pool_size(user_id)
+                return await message.answer("No matching profiles found!", reply_markup=main_menu_kb(pool_size))
+            else:
+                await Database.clear_seen_profiles(user_id)
+                await message.answer("🔄 You have viewed all matching profiles. Showing them a second time.")
+                profiles = all_profiles
 
-    target = profiles[0]
-    await Database.add_seen_profile(user_id, target['public_uuid'])
-    
-    await message.answer("🔍 Browsing...", reply_markup=browse_kb())
-    
-    # Check for pending requests specifically for these inline buttons
-    pending_cursor = Database.db.contact_requests.find({
-        "initiator_id": user_id,
-        "target_id": target['user_id'],
-        "status": "pending"
-    })
-    pending_docs = await pending_cursor.to_list(length=10)
-    pending_actions = [doc.get("action") for doc in pending_docs]
-    
-    private_contacts = [c for c in active.get("contacts", []) if not c.get("is_public")]
-    has_self_private = len(private_contacts) > 0
-    
-    target_private_contacts = [c for c in target.get("contacts", []) if not c.get("is_public")]
-    has_target_private = len(target_private_contacts) > 0
-    
-    await send_profile(
-        message.chat.id, 
-        target, 
-        browse_inline_kb(
-            target['public_uuid'], 
-            has_self_private=has_self_private, 
-            has_target_private=has_target_private,
-            pending_actions=pending_actions
+        target = profiles[0]
+        target_uuid = target.get('public_uuid', '')
+        await Database.add_seen_profile(user_id, target_uuid)
+        
+        # Send the browsing text
+        await message.answer("🔍 Browsing...", reply_markup=browse_kb())
+        
+        # Defensive fallback for target ID checks
+        target_id = target.get('user_id', 0)
+        
+        # Check for pending requests specifically for these inline buttons
+        pending_cursor = Database.db.contact_requests.find({
+            "initiator_id": user_id,
+            "target_id": target_id,
+            "status": "pending"
+        })
+        pending_docs = await pending_cursor.to_list(length=10)
+        pending_actions = [doc.get("action") for doc in pending_docs if doc.get("action")]
+        
+        private_contacts = [c for c in active.get("contacts", []) if not c.get("is_public")]
+        has_self_private = len(private_contacts) > 0
+        
+        target_private_contacts = [c for c in target.get("contacts", []) if not c.get("is_public")]
+        has_target_private = len(target_private_contacts) > 0
+        
+        await send_profile(
+            message.chat.id, 
+            target, 
+            browse_inline_kb(
+                target_uuid, 
+                has_self_private=has_self_private, 
+                has_target_private=has_target_private,
+                pending_actions=pending_actions
+            )
         )
-    )
+    except Exception as e:
+        logger.exception("Error during browse_next execution")
+        # Diagnostic report back to the user to prevent silent hanging
+        tb = traceback.format_exc()
+        await message.answer(
+            f"⚠️ <b>An internal rendering error occurred:</b>\n"
+            f"<code>{html.escape(str(e))}</code>\n\n"
+            f"Please check your server logs for more details.", 
+            parse_mode="HTML"
+        )
 
 @router.callback_query(F.data == "pending_alert")
 async def pending_alert_cb(callback: types.CallbackQuery):
@@ -295,7 +315,7 @@ async def execute_contact_request(user_id: int, state: FSMContext, message=None)
     
     action = data['action']
     
-    # 2. Strict double-check before saving to database (Protects against parallel API race conditions)
+    # Strict double-check before saving to database (Protects against parallel API race conditions)
     existing_req = await Database.db.contact_requests.find_one({
         "initiator_id": user_id,
         "target_id": target_prof['user_id'],
