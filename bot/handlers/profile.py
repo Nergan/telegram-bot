@@ -20,6 +20,7 @@ from core.locales import _, _btn
 router = Router()
 logger = logging.getLogger(__name__)
 
+# In-memory atomic tracker to prevent database asynchronous write race conditions
 ACTIVE_MEDIA_GROUPS = set()
 
 @router.message(F.text.in_(_btn("btn_edit_active")))
@@ -60,21 +61,6 @@ async def capture_text(message: types.Message, state: FSMContext, lang: str):
     await state.clear()
 
 @router.message(ProfileSetup.waiting_for_media)
-async def capture_media(message: types.Message, state: FSMContext, lang: str):
-    if message.text == _("btn_cancel", lang):
-        from bot.handlers.base import fsm_cancel
-        await fsm_cancel(message, state, lang)
-        return
-    if message.text == _("btn_clear", lang):
-        from bot.handlers.base import fsm_clear
-        await fsm_clear(message, state, lang)
-        return
-    valid_types = ['photo', 'video', 'voice', 'animation', 'audio', 'document']
-    if message.content_type not in valid_types:
-        return await message.answer(_("invalid_media", lang))
-        
-    active_prof = await Database.get_active_profile(message.from_user.id)
-    if not active_prof:@router.message(ProfileSetup.waiting_for_media)
 async def capture_media(message: types.Message, state: FSMContext, lang: str):
     if message.text == _("btn_cancel", lang):
         from bot.handlers.base import fsm_cancel
