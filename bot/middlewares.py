@@ -2,6 +2,7 @@ import time
 from aiogram import BaseMiddleware
 from aiogram.types import Update
 from core.database import Database
+from core.locales import _
 
 # In-memory throttle state: keeps track of the last action timestamp
 THROTTLE_STORE = {}
@@ -54,6 +55,14 @@ class AdvancedMiddleware(BaseMiddleware):
         lang = "en"
         if user_id:
             lang = await Database.get_user_lang(user_id)
+            
+            # ---> BAN MECHANISM INJECTION <---
+            if await Database.is_user_banned(user_id):
+                if event.message:
+                    await event.message.answer(_("err_banned", lang))
+                elif event.callback_query:
+                    await event.callback_query.answer(_("err_banned", lang), show_alert=True)
+                return # Halt update pipeline. Handlers will never be invoked.
             
             # Reduce Log Volume: Log ONLY commands, callbacks, and FSM interactions.
             if action_type in ["cmd", "cb", "fsm_msg"]:

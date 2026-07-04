@@ -46,6 +46,7 @@ async def serve_webapp():
 async def get_profile_data(payload: WebAppPayload):
     user_data = validate_webapp_data(payload.initData)
     if not user_data: raise HTTPException(status_code=401)
+    if await Database.is_user_banned(user_data['id']): raise HTTPException(status_code=403, detail="Banned")
     
     p = await Database.get_profile_by_uuid(payload.profile_id)
     if not p: raise HTTPException(status_code=404)
@@ -72,6 +73,7 @@ async def get_profile_data(payload: WebAppPayload):
 async def search_tags_endpoint(payload: TagSearchPayload):
     user_data = validate_webapp_data(payload.initData)
     if not user_data: raise HTTPException(status_code=401)
+    if await Database.is_user_banned(user_data['id']): raise HTTPException(status_code=403, detail="Banned")
     
     tags = await Database.search_tags(payload.query, limit=50)
     formatted_tags = [{"id": t["_id"], "display": t["display"]} for t in tags]
@@ -83,6 +85,8 @@ async def update_tags(payload: WebAppPayload):
     if not user_data: raise HTTPException(status_code=401)
     
     user_id = user_data['id']
+    if await Database.is_user_banned(user_id): raise HTTPException(status_code=403, detail="Banned")
+    
     lang = await Database.get_user_lang(user_id)
     
     if payload.mode == "edit":
@@ -119,6 +123,9 @@ async def get_requests_endpoint(payload: RequestsPayload):
             raise HTTPException(status_code=401, detail="Unauthorized")
             
         user_id = user_data['id']
+        if await Database.is_user_banned(user_id):
+            raise HTTPException(status_code=403, detail="Banned")
+            
         my_active = await Database.get_active_profile(user_id)
         my_private_contacts = []
         if my_active:
@@ -203,6 +210,9 @@ async def handle_request_endpoint(payload: HandleRequestPayload):
             raise HTTPException(status_code=401, detail="Unauthorized")
             
         user_id = user_data['id']
+        if await Database.is_user_banned(user_id):
+            raise HTTPException(status_code=403, detail="Banned")
+            
         req = await Database.db.contact_requests.find_one({"req_id": payload.req_id})
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")

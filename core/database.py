@@ -1,6 +1,7 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 import uuid
 import datetime
+import time
 import random
 import asyncio
 from core.config import MONGODB_URI
@@ -13,6 +14,10 @@ class Database:
     db = None
     log_queue = None
     log_task = None
+    
+    # In-memory fast cache to prevent spamming MongoDB reads for banned users
+    _ban_cache = {}
+    _ban_cache_time = {}
 
     @classmethod
     async def connect(cls):
@@ -21,7 +26,9 @@ class Database:
         cls.log_queue = asyncio.Queue()
         # Build index for the O(log N) randomizer
         await cls.db.profiles.create_index([("random_index", 1)])
-        logger.info("Connected to MongoDB and verified index.")
+        # Index for fast ban lookup
+        await cls.db.users.create_index([("user_id", 1)], unique=True)
+        logger.info("Connected to MongoDB and verified indexes.")
 
     @classmethod
     def disconnect(cls):
@@ -87,6 +94,27 @@ class Database:
     async def get_user_lang(cls, user_id: int) -> str:
         settings = await cls.db.user_settings.find_one({"user_id": user_id})
         return settings.get("lang", "en") if settings else "en"
+
+    @classmethod
+    async def is_user_banned(cls, user_id: int) -> bool:
+        """Check if user is banned using DB + 60s memory cache for extreme speed & safety."""
+        now = time.time()
+        if user_id in cls._ban_cache and now - cls._ban_cache_time.get(user_id, 0) < 60:
+            return cls._ban_cache[user_id]
+        
+        user = await cls.db.users.find_one({"user_id": user_id})
+        is_banned = user.get("is_banned", False) if user else False
+        
+        cls._ban_cache[user_id] = is_banned
+        cls._ban_cache_time[user_id] = now
+        return is_banned
+
+    @classmethod
+    async def set_user_banned(cls, user_id: int, banned: bool):
+        """Helper to modify ban statuses manually programmatically if needed."""
+        await cls.db.users.update_one({"user_id": user_id}, {"$set": {"is_banned": banned}}, upsert=True)
+        cls._ban_cache[user_id] = banned
+        cls._ban_cache_time[user_id] = time.time()
 
     @classmethod
     async def get_or_create_active_profile(cls, user_id: int, username: str = None) -> dict:

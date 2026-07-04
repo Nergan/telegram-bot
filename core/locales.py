@@ -102,7 +102,9 @@ TRANSLATIONS = {
         
         "err_fsm": "❌ Invalid input for this step. Please correct it or press '❌ Cancel'.",
         "err_unknown": "🤷 Unrecognized command. Please use the menu buttons below.",
-        "err_start": "🤷 Send /start to begin."
+        "err_start": "🤷 Send /start to begin.",
+        
+        "err_banned": "❌ You are banned from using this bot."
     },
     "ru": {
         "btn_browse": "🔍 Смотреть ({})",
@@ -207,7 +209,9 @@ TRANSLATIONS = {
         
         "err_fsm": "❌ Неверный ввод для этого шага. Исправьте или нажмите '❌ Отмена'.",
         "err_unknown": "🤷‍♂️ Неизвестная команда. Пожалуйста, используйте кнопки меню.",
-        "err_start": "🤷 Для начала отправьте /start."
+        "err_start": "🤷 Для начала отправьте /start.",
+        
+        "err_banned": "❌ Вы заблокированы в этом боте."
     },
     "pt": {
         "btn_browse": "🔍 Ver ({})",
@@ -312,7 +316,9 @@ TRANSLATIONS = {
         
         "err_fsm": "❌ Entrada inválida para este passo. Por favor, corrija-a ou pressione '❌ Cancelar'.",
         "err_unknown": "🤷 Comando não reconhecido. Por favor, use os botões do menu abaixo.",
-        "err_start": "🤷 Envie /start para começar."
+        "err_start": "🤷 Envie /start para começar.",
+        
+        "err_banned": "❌ Você está banido de usar este bot."
     }
 }
 
