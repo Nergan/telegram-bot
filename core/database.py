@@ -225,3 +225,25 @@ class Database:
             "status": "pending"
         })
         return sent, recv
+    
+    @classmethod
+    async def get_tags_by_ids(cls, tag_ids: list) -> list:
+        """Fetches full tag documents by their IDs."""
+        if not tag_ids: return []
+        cursor = cls.db.tags.find({"_id": {"$in": tag_ids}})
+        return await cursor.to_list(length=len(tag_ids))
+
+    @classmethod
+    async def search_tags(cls, query: str, limit: int = 50) -> list:
+        """Smart, highly optimized search utilizing MongoDB indexing."""
+        if not query:
+            # Empty query: return top weight tags (countries, popular hobbies)
+            return await cls.db.tags.find().sort([("weight", -1), ("display.en", 1)]).limit(limit).to_list(length=limit)
+        
+        q_lower = query.lower().strip()
+        # Fast prefix matching on the flattened search_terms array
+        # Using $regex with ^ anchors utilizes the index effectively
+        cursor = cls.db.tags.find({"search_terms": {"$regex": f"^{q_lower}"}})
+        # Sort by weight (Countries 100 > Cities 50), then reverse alphabetical (Z to A)
+        cursor = cursor.sort([("weight", -1), ("display.en", -1)]).limit(limit)
+        return await cursor.to_list(length=limit)

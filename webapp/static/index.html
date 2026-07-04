@@ -153,8 +153,9 @@
         };
         const _i = (k) => I18N[lang][k] || I18N['en'][k];
 
-        let allTags = {{AVAILABLE_TAGS_JSON}}; 
-        let stateMap = {};
+        let selectedTags = []; // Array of full tag objects
+        let availableTags = []; // Array of full tag objects from search
+        let debounceTimer;
 
         // Requests variables
         let sentRequests = [];
@@ -163,7 +164,6 @@
         let currentTab = 'received';
         let modalReqId = '';
 
-        // --- Custom Dialog System to completely replace native alert/confirm and block domain exposure ---
         function showCustomAlert(text, onOk) {
             document.getElementById('dialog-title').innerText = _i('info');
             document.getElementById('dialog-text').innerText = text;
@@ -201,7 +201,6 @@
             document.getElementById('custom-dialog-overlay').classList.remove('hidden');
         }
 
-        // --- Confirm button disabler if no private contact is checked ---
         function updateModalButtonState() {
             const selectedBoxes = document.querySelectorAll('input[name="private_contact"]:checked');
             const confirmBtn = document.getElementById('modal-confirm-btn');
@@ -247,27 +246,46 @@
                 return;
             }
 
-            allTags.forEach(t => stateMap[t.id] = 0);
             try {
                 let pRes = await fetch('/api/get_profile_data', { 
-                    method: 'POST', 
-                    headers: {'Content-Type': 'application/json'}, 
+                    method: 'POST', headers: {'Content-Type': 'application/json'}, 
                     body: JSON.stringify({ initData: tg.initData, profile_id: profile_id, mode: mode }) 
                 });
                 
                 if (pRes.ok) {
                     let pData = await pRes.json();
                     if(mode === 'edit') { 
-                        pData.tags.forEach(t => { if(t in stateMap) stateMap[t] = 1; }); 
+                        selectedTags = pData.tags.map(t => ({...t, filter_state: 1}));
                     } else {
-                        let f = pData.filters;
-                        if(f.require_tags) f.require_tags.forEach(t => { if(t in stateMap) stateMap[t] = 1; });
-                        if(f.exclude_tags) f.exclude_tags.forEach(t => { if(t in stateMap) stateMap[t] = 2; });
-                        if(f.any_tags) f.any_tags.forEach(t => { if(t in stateMap) stateMap[t] = 3; });
+                        selectedTags = [
+                            ...pData.filters.require_tags.map(t => ({...t, filter_state: 1})),
+                            ...pData.filters.exclude_tags.map(t => ({...t, filter_state: 2})),
+                            ...pData.filters.any_tags.map(t => ({...t, filter_state: 3}))
+                        ];
                     }
                 }
             } catch (e) { console.error(e); }
-            renderTags();
+            
+            performSearch("");
+        }
+
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => performSearch(e.target.value), 300);
+        });
+
+        async function performSearch(query) {
+            try {
+                let res = await fetch('/api/search_tags', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ initData: tg.initData, query: query })
+                });
+                if (res.ok) {
+                    let data = await res.json();
+                    availableTags = data.tags;
+                    renderTags();
+                }
+            } catch (e) { console.error(e); }
         }
 
         function renderTags() {
@@ -275,51 +293,69 @@
             const availCont = document.getElementById('available-container');
             selCont.innerHTML = ''; availCont.innerHTML = '';
 
-            allTags.forEach(tag => {
-                const el = document.createElement('div');
-                const tDisp = tag.display[lang] || tag.display['en'];
-                const tAlias = (tag.aliases[lang] || tag.aliases['en']).join(' ').toLowerCase();
-                
-                el.innerText = tDisp; 
-                el.dataset.aliases = tAlias;
-                el.className = 'tag';
-                let st = stateMap[tag.id];
-                
-                if(mode === 'edit' && st === 1) el.classList.add('selected');
-                else if(mode === 'filter') {
-                    if(st === 1) el.classList.add('require');
-                    if(st === 2) el.classList.add('exclude');
-                    if(st === 3) el.classList.add('any');
+            selectedTags.forEach(tag => {
+                selCont.appendChild(createTagElement(tag, true));
+            });
+
+            availableTags.forEach(tag => {
+                if (!selectedTags.find(st => st.id === tag.id)) {
+                    availCont.appendChild(createTagElement(tag, false));
                 }
-
-                el.onclick = () => {
-                    if(mode === 'edit') stateMap[tag.id] = st === 1 ? 0 : 1;
-                    else stateMap[tag.id] = (st + 1) % 4;
-                    tg.MainButton.setText(_i('save')); tg.MainButton.show();
-                    renderTags(); 
-                };
-
-                if(st !== 0) selCont.appendChild(el); else availCont.appendChild(el);
             });
         }
 
-        document.getElementById('searchInput').addEventListener('input', (e) => {
-            const q = e.target.value.toLowerCase();
-            document.getElementById('available-container').querySelectorAll('.tag').forEach(el => {
-                if(el.innerText.toLowerCase().includes(q) || el.dataset.aliases.includes(q)) el.classList.remove('hidden');
-                else el.classList.add('hidden');
-            });
-        });
+        function createTagElement(tag, isSelected) {
+            const el = document.createElement('div');
+            const tDisp = tag.display[lang] || tag.display['en'];
+            el.innerText = tDisp; 
+            el.className = 'tag';
+            
+            if (isSelected) {
+                if(mode === 'edit') el.classList.add('selected');
+                else if(mode === 'filter') {
+                    if(tag.filter_state === 1) el.classList.add('require');
+                    if(tag.filter_state === 2) el.classList.add('exclude');
+                    if(tag.filter_state === 3) el.classList.add('any');
+                }
+            }
+
+            el.onclick = () => {
+                if (isSelected) {
+                    if (mode === 'edit') {
+                        selectedTags = selectedTags.filter(st => st.id !== tag.id);
+                    } else {
+                        tag.filter_state = (tag.filter_state + 1) % 4;
+                        if (tag.filter_state === 0) {
+                            selectedTags = selectedTags.filter(st => st.id !== tag.id);
+                        }
+                    }
+                } else {
+                    if (mode === 'edit') {
+                        tag.filter_state = 1;
+                    } else {
+                        tag.filter_state = 1;
+                    }
+                    selectedTags.push(tag);
+                }
+                
+                tg.MainButton.setText(_i('save')); tg.MainButton.show();
+                renderTags(); 
+            };
+            return el;
+        }
 
         tg.MainButton.onClick(async () => {
             if (mode === 'requests') return;
             let pay = { initData: tg.initData, mode: mode, profile_id: profile_id };
-            if(mode === 'edit') pay.tags = Object.keys(stateMap).filter(k => stateMap[k] === 1);
-            else {
-                pay.require_tags = Object.keys(stateMap).filter(k => stateMap[k] === 1);
-                pay.exclude_tags = Object.keys(stateMap).filter(k => stateMap[k] === 2);
-                pay.any_tags = Object.keys(stateMap).filter(k => stateMap[k] === 3);
+            
+            if(mode === 'edit') {
+                pay.tags = selectedTags.map(t => t.id);
+            } else {
+                pay.require_tags = selectedTags.filter(t => t.filter_state === 1).map(t => t.id);
+                pay.exclude_tags = selectedTags.filter(t => t.filter_state === 2).map(t => t.id);
+                pay.any_tags = selectedTags.filter(t => t.filter_state === 3).map(t => t.id);
             }
+            
             await fetch('/api/update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(pay) });
             tg.close();
         });
@@ -362,7 +398,12 @@
             const filtered = list.filter(r => {
                 const otherProf = r.other_profile || {};
                 const bio = (otherProf.bio || '').toLowerCase();
-                const tags = Array.isArray(otherProf.tags) ? otherProf.tags.map(t => `#${t}`).join(' ').toLowerCase() : '';
+                const tags = Array.isArray(otherProf.tags) ? otherProf.tags.map(t => {
+                    if (typeof t === 'object' && t.display) {
+                        return `#${(t.display[lang] || t.display['en'] || t.id)}`.toLowerCase();
+                    }
+                    return `#${t}`.toLowerCase();
+                }).join(' ') : '';
                 const pUuid = (otherProf.public_uuid || '').toLowerCase();
                 const publicCon = Array.isArray(otherProf.public_contacts) ? otherProf.public_contacts.join(' ').toLowerCase() : '';
                 const msg = (r.message || '').toLowerCase();
@@ -385,10 +426,12 @@
                 
                 let translatedTags = [];
                 if (Array.isArray(otherProf.tags)) {
-                    otherProf.tags.forEach(tid => {
-                        const tagDef = allTags.find(x => x.id === tid);
-                        if(tagDef) translatedTags.push(tagDef.display[lang] || tagDef.display['en']);
-                        else translatedTags.push(tid);
+                    otherProf.tags.forEach(t => {
+                        if (t && typeof t === 'object' && t.display) {
+                            translatedTags.push(t.display[lang] || t.display['en'] || t.id);
+                        } else if (typeof t === 'string') {
+                            translatedTags.push(t);
+                        }
                     });
                 }
                 let tagsHtml = translatedTags.map(t => `#${t}`).join(' ');

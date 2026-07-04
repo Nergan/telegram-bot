@@ -3,7 +3,7 @@ import logging
 from aiogram.types import LinkPreviewOptions, InputMediaPhoto, InputMediaVideo
 from bot.bot_setup import bot
 from core.locales import _
-from core.config import AVAILABLE_TAGS
+from core.database import Database # Added import
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +26,19 @@ async def send_profile(chat_id: int, profile: dict, kb, lang: str, custom_prefix
         text += "\n"
         
     if profile.get('tags'): 
-        # Multi-lang tag translation for the chat view
+        # Multi-lang tag translation dynamically from Database
+        tag_docs = await Database.get_tags_by_ids(profile['tags'])
         translated_tags = []
         for tid in profile['tags']:
-            tag_def = next((t for t in AVAILABLE_TAGS if t['id'] == tid), None)
+            # Find the fetched doc to maintain original order
+            tag_def = next((t for t in tag_docs if t['_id'] == tid), None)
             if tag_def:
                 translated_tags.append(tag_def['display'].get(lang, tag_def['display']['en']))
             else:
                 translated_tags.append(tid)
         
-        text += _("lbl_tags", lang, ' #'.join(translated_tags))
+        if translated_tags:
+            text += _("lbl_tags", lang, ' #'.join(translated_tags))
             
     media = profile.get("media", [])
     opts = LinkPreviewOptions(is_disabled=True)

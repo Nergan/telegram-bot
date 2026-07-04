@@ -33,19 +33,40 @@ class HandleRequestPayload(BaseModel):
     req_id: str
     action: str  # "accept", "decline", "viewed"
     selected_contact_ids: Optional[List[str]] = None
+    
+class TagSearchPayload(BaseModel):
+    initData: str
+    query: str
 
 @router.get("/webapp", response_class=HTMLResponse)
 async def serve_webapp():
     with open(os.path.join(os.path.dirname(__file__), "static", "index.html"), "r", encoding="utf-8") as f:
-        html_content = f.read()
-    return html_content.replace("{{AVAILABLE_TAGS_JSON}}", json.dumps(AVAILABLE_TAGS))
+        return f.read()
 
 @router.post("/api/get_profile_data")
 async def get_profile_data(payload: WebAppPayload):
     user_data = validate_webapp_data(payload.initData)
     if not user_data: raise HTTPException(status_code=401)
+    
     p = await Database.get_profile_by_uuid(payload.profile_id)
-    return {"tags": p.get("tags", []), "filters": p.get("filters", {})}
+    if not p: raise HTTPException(status_code=404)
+    
+    # Fetch full tag objects so the WebApp can display them without a global list
+    active_tags = await Database.get_tags_by_ids(p.get("tags", []))
+    
+    f = p.get("filters", {})
+    req_tags = await Database.get_tags_by_ids(f.get("require_tags", []))
+    exc_tags = await Database.get_tags_by_ids(f.get("exclude_tags", []))
+    any_tags = await Database.get_tags_by_ids(f.get("any_tags", []))
+    
+    return {
+        "tags": active_tags, 
+        "filters": {
+            "require_tags": req_tags,
+            "exclude_tags": exc_tags,
+            "any_tags": any_tags
+        }
+    }
 
 @router.post("/api/update")
 async def update_tags(payload: WebAppPayload):
@@ -80,6 +101,16 @@ async def update_tags(payload: WebAppPayload):
             await bot.send_message(user_id, msg)
         
     return {"status": "ok"}
+
+@router.post("/api/search_tags")
+async def search_tags_endpoint(payload: TagSearchPayload):
+    user_data = validate_webapp_data(payload.initData)
+    if not user_data: raise HTTPException(status_code=401)
+    
+    tags = await Database.search_tags(payload.query, limit=50)
+    # Format for JSON serialization
+    for t in tags: t["id"] = t.pop("_id") 
+    return {"tags": tags}
 
 @router.post("/api/get_requests")
 async def get_requests_endpoint(payload: RequestsPayload):
