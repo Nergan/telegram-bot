@@ -59,14 +59,24 @@ async def update_tags(payload: WebAppPayload):
         await Database.db.profiles.update_one({"user_id": user_id, "public_uuid": payload.profile_id}, {"$set": {"tags": payload.tags}})
         active = await Database.get_active_profile(user_id)
         if active and active['public_uuid'] == payload.profile_id:
-            msg = "✅ Tags successfully updated!" if lang == "en" else "✅ Теги успешно обновлены!"
+            if lang == "en":
+                msg = "✅ Tags successfully updated!"
+            elif lang == "pt":
+                msg = "✅ Tags atualizadas com sucesso!"
+            else:
+                msg = "✅ Теги успешно обновлены!"
             await bot.send_message(user_id, msg)
     else:
         f_data = {"require_tags": payload.require_tags, "exclude_tags": payload.exclude_tags, "any_tags": payload.any_tags}
         await Database.db.profiles.update_one({"user_id": user_id, "public_uuid": payload.profile_id}, {"$set": {"filters": f_data}})
         active = await Database.get_active_profile(user_id)
         if active and active['public_uuid'] == payload.profile_id:
-            msg = "✅ Filters successfully updated!" if lang == "en" else "✅ Фильтры успешно обновлены!"
+            if lang == "en":
+                msg = "✅ Filters successfully updated!"
+            elif lang == "pt":
+                msg = "✅ Filtros atualizados com sucesso!"
+            else:
+                msg = "✅ Фильтры успешно обновлены!"
             await bot.send_message(user_id, msg)
         
     return {"status": "ok"}

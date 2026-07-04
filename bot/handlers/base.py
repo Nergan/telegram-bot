@@ -11,7 +11,7 @@ from core.locales import _, _btn
 router = Router()
 logger = logging.getLogger(__name__)
 
-@router.message(Command("lang_en", "lang_ru"))
+@router.message(Command("lang_en", "lang_ru", "lang_pt"))
 async def switch_language(message: types.Message, state: FSMContext, lang: str):
     new_lang = message.text.split("_")[1]
     await Database.set_user_lang(message.from_user.id, new_lang)
