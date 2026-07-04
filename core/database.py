@@ -16,13 +16,14 @@ class Database:
     log_task = None
 
     @classmethod
-    def connect(cls):
+    async def connect(cls):
         cls.client = AsyncIOMotorClient(MONGODB_URI, tls=True, tlsAllowInvalidCertificates=True)
         cls.db = cls.client["day_dating_bot"]
         cls.log_queue = asyncio.Queue()
-        # Build index for the O(log N) randomizer
-        asyncio.create_task(cls.db.profiles.create_index([("random_index", 1)]))
-        logger.info("Connected to MongoDB.")
+        
+        # Await the index creation directly to avoid the Future-to-Task wrapping error
+        await cls.db.profiles.create_index([("random_index", 1)])
+        logger.info("Connected to MongoDB and verified index.")
 
     # ... keep disconnect ...
 

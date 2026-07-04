@@ -23,8 +23,13 @@ bg_tasks = set()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Database.connect()
+    # Await the async connection and index setup
+    await Database.connect()
+    
+    # Start log batching worker
     Database.log_task = asyncio.create_task(Database.log_worker())
+    
+    # Async migration for existing profiles missing random_index
     await Database.migrate_random_indexes()
     
     await setup_bot_commands()
