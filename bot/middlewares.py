@@ -3,7 +3,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import Update
 from core.database import Database
 
-# In-memory throttle state (Very lightweight: ~10MB for 100k users)
+# In-memory throttle state: keeps track of the last action timestamp
 THROTTLE_STORE = {}
 
 class AdvancedMiddleware(BaseMiddleware):
@@ -23,8 +23,12 @@ class AdvancedMiddleware(BaseMiddleware):
             
             # Message Throttling (0.8s)
             now = time.time()
-            if now - THROTTLE_STORE.get(user_id, 0) < 0.8:
-                return # Silently drop spam message
+            
+            # EXEMPTion: If the message is part of an album, do not apply the rate limit
+            is_media_group = event.message.media_group_id is not None
+            if not is_media_group and (now - THROTTLE_STORE.get(user_id, 0) < 0.8):
+                return # Drop standard spam messages entirely
+            
             THROTTLE_STORE[user_id] = now
             
             if event.message.text and event.message.text.startswith("/"):
@@ -51,7 +55,7 @@ class AdvancedMiddleware(BaseMiddleware):
         if user_id:
             lang = await Database.get_user_lang(user_id)
             
-            # Log Volume Reduction: Log ONLY commands, callbacks, and FSM inputs
+            # Reduce Log Volume: Log ONLY commands, callbacks, and FSM interactions.
             if action_type in ["cmd", "cb", "fsm_msg"]:
                 Database.log_action_queued(user_id, action_type, log_data)
             
