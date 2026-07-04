@@ -20,6 +20,8 @@ from core.locales import _, _btn
 router = Router()
 logger = logging.getLogger(__name__)
 
+ACTIVE_MEDIA_GROUPS = set()
+
 @router.message(F.text.in_(_btn("btn_edit_active")))
 async def edit_info_menu(message: types.Message, lang: str):
     await message.answer(_("menu_edit", lang), reply_markup=edit_info_menu_kb(lang))
@@ -72,6 +74,21 @@ async def capture_media(message: types.Message, state: FSMContext, lang: str):
         return await message.answer(_("invalid_media", lang))
         
     active_prof = await Database.get_active_profile(message.from_user.id)
+    if not active_prof:@router.message(ProfileSetup.waiting_for_media)
+async def capture_media(message: types.Message, state: FSMContext, lang: str):
+    if message.text == _("btn_cancel", lang):
+        from bot.handlers.base import fsm_cancel
+        await fsm_cancel(message, state, lang)
+        return
+    if message.text == _("btn_clear", lang):
+        from bot.handlers.base import fsm_clear
+        await fsm_clear(message, state, lang)
+        return
+    valid_types = ['photo', 'video', 'voice', 'animation', 'audio', 'document']
+    if message.content_type not in valid_types:
+        return await message.answer(_("invalid_media", lang))
+        
+    active_prof = await Database.get_active_profile(message.from_user.id)
     if not active_prof:
         return await message.answer(_("prof_not_found", lang))
 
@@ -84,34 +101,35 @@ async def capture_media(message: types.Message, state: FSMContext, lang: str):
     elif message.document: media_doc['file_id'] = message.document.file_id
     
     if message.media_group_id:
-        # Check FSM context data to see if we've already started processing this album
-        state_data = await state.get_data()
-        current_group_id = state_data.get("media_group_id")
-        
-        if current_group_id != message.media_group_id:
-            # FIRST message of the album: Wipe existing media and set the first item
-            await state.update_data(media_group_id=message.media_group_id)
-            await Database.db.profiles.update_one(
-                {"public_uuid": active_prof['public_uuid']}, 
-                {"$set": {"media": [media_doc]}}
-            )
+        # Atomic synchronous check: guarantees ONLY the first message executes the replacement block
+        if message.media_group_id not in ACTIVE_MEDIA_GROUPS:
+            ACTIVE_MEDIA_GROUPS.add(message.media_group_id)
             
-            await message.answer(_("album_proc", lang))
-            await asyncio.sleep(1.5)
-            
-            # Verify the state context is still valid for this album before closing it out
-            fresh_data = await state.get_data()
-            if fresh_data.get("media_group_id") == message.media_group_id:
-                await state.clear()
-                await message.answer(_("album_saved", lang), reply_markup=edit_info_menu_kb(lang))
+            try:
+                await state.update_data(media_group_id=message.media_group_id)
+                await Database.db.profiles.update_one(
+                    {"public_uuid": active_prof['public_uuid']}, 
+                    {"$set": {"media": [media_doc]}}
+                )
+                
+                await message.answer(_("album_proc", lang))
+                await asyncio.sleep(1.5)
+                
+                fresh_data = await state.get_data()
+                if fresh_data.get("media_group_id") == message.media_group_id:
+                    await state.clear()
+                    await message.answer(_("album_saved", lang), reply_markup=edit_info_menu_kb(lang))
+            finally:
+                # Ensure the in-memory set is cleaned up even if database calls fail
+                ACTIVE_MEDIA_GROUPS.discard(message.media_group_id)
         else:
-            # SUBSEQUENT messages of the same album: Append them to the newly replaced list
+            # Subsequent messages are securely routed here to append to the database
             await Database.db.profiles.update_one(
                 {"public_uuid": active_prof['public_uuid']}, 
                 {"$push": {"media": media_doc}}
             )
     else:
-        # Single media upload: Completely replace existing media with the single new item
+        # Single media upload: completely replace existing media
         await Database.db.profiles.update_one(
             {"public_uuid": active_prof['public_uuid']}, 
             {"$set": {"media": [media_doc]}}
