@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from core.config import AVAILABLE_TAGS
 from core.security import validate_webapp_data
 from core.database import Database
 from bot.bot_setup import bot
@@ -25,6 +24,10 @@ class WebAppPayload(BaseModel):
     exclude_tags: List[str] = Field(default_factory=list)
     any_tags: List[str] = Field(default_factory=list)
 
+class TagSearchPayload(BaseModel):
+    initData: str
+    query: str
+
 class RequestsPayload(BaseModel):
     initData: str
 
@@ -33,10 +36,6 @@ class HandleRequestPayload(BaseModel):
     req_id: str
     action: str  # "accept", "decline", "viewed"
     selected_contact_ids: Optional[List[str]] = None
-    
-class TagSearchPayload(BaseModel):
-    initData: str
-    query: str
 
 @router.get("/webapp", response_class=HTMLResponse)
 async def serve_webapp():
@@ -51,22 +50,32 @@ async def get_profile_data(payload: WebAppPayload):
     p = await Database.get_profile_by_uuid(payload.profile_id)
     if not p: raise HTTPException(status_code=404)
     
-    # Fetch full tag objects so the WebApp can display them without a global list
-    active_tags = await Database.get_tags_by_ids(p.get("tags", []))
+    # Fetch full tag objects so WebApp can render them directly
+    active_tags_data = await Database.get_tags_by_ids(p.get("tags", []))
+    active_tags = [{"id": t["_id"], "display": t["display"]} for t in active_tags_data]
     
-    f = p.get("filters", {})
-    req_tags = await Database.get_tags_by_ids(f.get("require_tags", []))
-    exc_tags = await Database.get_tags_by_ids(f.get("exclude_tags", []))
-    any_tags = await Database.get_tags_by_ids(f.get("any_tags", []))
+    f_data = p.get("filters", {})
+    req_tags_data = await Database.get_tags_by_ids(f_data.get("require_tags", []))
+    exc_tags_data = await Database.get_tags_by_ids(f_data.get("exclude_tags", []))
+    any_tags_data = await Database.get_tags_by_ids(f_data.get("any_tags", []))
     
     return {
         "tags": active_tags, 
         "filters": {
-            "require_tags": req_tags,
-            "exclude_tags": exc_tags,
-            "any_tags": any_tags
+            "require_tags": [{"id": t["_id"], "display": t["display"]} for t in req_tags_data],
+            "exclude_tags": [{"id": t["_id"], "display": t["display"]} for t in exc_tags_data],
+            "any_tags": [{"id": t["_id"], "display": t["display"]} for t in any_tags_data]
         }
     }
+
+@router.post("/api/search_tags")
+async def search_tags_endpoint(payload: TagSearchPayload):
+    user_data = validate_webapp_data(payload.initData)
+    if not user_data: raise HTTPException(status_code=401)
+    
+    tags = await Database.search_tags(payload.query, limit=50)
+    formatted_tags = [{"id": t["_id"], "display": t["display"]} for t in tags]
+    return {"tags": formatted_tags}
 
 @router.post("/api/update")
 async def update_tags(payload: WebAppPayload):
@@ -102,16 +111,6 @@ async def update_tags(payload: WebAppPayload):
         
     return {"status": "ok"}
 
-@router.post("/api/search_tags")
-async def search_tags_endpoint(payload: TagSearchPayload):
-    user_data = validate_webapp_data(payload.initData)
-    if not user_data: raise HTTPException(status_code=401)
-    
-    tags = await Database.search_tags(payload.query, limit=50)
-    # Format for JSON serialization
-    for t in tags: t["id"] = t.pop("_id") 
-    return {"tags": tags}
-
 @router.post("/api/get_requests")
 async def get_requests_endpoint(payload: RequestsPayload):
     try:
@@ -141,6 +140,10 @@ async def get_requests_endpoint(payload: RequestsPayload):
             if not target_id: continue
             other_profile = await Database.get_active_profile(target_id)
             if not other_profile: continue
+            
+            # Fetch and map full display values for tag tags
+            tags_data = await Database.get_tags_by_ids(other_profile.get("tags", []))
+            formatted_tags = [{"id": t["_id"], "display": t["display"]} for t in tags_data]
                 
             formatted_sent.append({
                 "req_id": r.get("req_id", ""),
@@ -151,7 +154,7 @@ async def get_requests_endpoint(payload: RequestsPayload):
                 "other_profile": {
                     "public_uuid": other_profile.get("public_uuid", ""),
                     "bio": other_profile.get("text", "") or "",
-                    "tags": other_profile.get("tags", []),
+                    "tags": formatted_tags,
                     "public_contacts": [c.get("value", "") for c in other_profile.get("contacts", []) if c.get("is_public")]
                 }
             })
@@ -162,6 +165,10 @@ async def get_requests_endpoint(payload: RequestsPayload):
             if not initiator_id: continue
             other_profile = await Database.get_active_profile(initiator_id)
             if not other_profile: continue
+            
+            # Fetch and map full display values for tag tags
+            tags_data = await Database.get_tags_by_ids(other_profile.get("tags", []))
+            formatted_tags = [{"id": t["_id"], "display": t["display"]} for t in tags_data]
                 
             formatted_recv.append({
                 "req_id": r.get("req_id", ""),
@@ -172,7 +179,7 @@ async def get_requests_endpoint(payload: RequestsPayload):
                 "other_profile": {
                     "public_uuid": other_profile.get("public_uuid", ""),
                     "bio": other_profile.get("text", "") or "",
-                    "tags": other_profile.get("tags", []),
+                    "tags": formatted_tags,
                     "public_contacts": [c.get("value", "") for c in other_profile.get("contacts", []) if c.get("is_public")]
                 }
             })

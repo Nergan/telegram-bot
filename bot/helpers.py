@@ -3,7 +3,7 @@ import logging
 from aiogram.types import LinkPreviewOptions, InputMediaPhoto, InputMediaVideo
 from bot.bot_setup import bot
 from core.locales import _
-from core.database import Database # Added import
+from core.database import Database
 
 logger = logging.getLogger(__name__)
 
