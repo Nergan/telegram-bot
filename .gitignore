@@ -13,3 +13,4 @@ htmlcov/
 
 repomix.config.json
 code.md
+tag_seeder.py

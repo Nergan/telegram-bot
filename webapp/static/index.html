@@ -293,11 +293,29 @@
             const availCont = document.getElementById('available-container');
             selCont.innerHTML = ''; availCont.innerHTML = '';
 
-            selectedTags.forEach(tag => {
+            // Sort selected tags alphabetically by display name in the current language
+            const sortedSelected = [...selectedTags].sort((a, b) => {
+                const valA = a.display[lang] || a.display['en'] || '';
+                const valB = b.display[lang] || b.display['en'] || '';
+                return valA.localeCompare(valB, lang);
+            });
+
+            // Sort available tags alphabetically when search bar is empty
+            const isSearching = document.getElementById('searchInput').value.trim() !== "";
+            let sortedAvailable = [...availableTags];
+            if (!isSearching) {
+                sortedAvailable.sort((a, b) => {
+                    const valA = a.display[lang] || a.display['en'] || '';
+                    const valB = b.display[lang] || b.display['en'] || '';
+                    return valA.localeCompare(valB, lang);
+                });
+            }
+
+            sortedSelected.forEach(tag => {
                 selCont.appendChild(createTagElement(tag, true));
             });
 
-            availableTags.forEach(tag => {
+            sortedAvailable.forEach(tag => {
                 if (!selectedTags.find(st => st.id === tag.id)) {
                     availCont.appendChild(createTagElement(tag, false));
                 }

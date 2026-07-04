@@ -237,10 +237,11 @@ class Database:
     async def search_tags(cls, query: str, limit: int = 50) -> list:
         """Smart, highly optimized search utilizing MongoDB indexing."""
         if not query:
-            # Empty query: Exclude 'age' and 'geo', show only general/dating/fetish etc.
-            return await cls.db.tags.find(
-                {"category": {"$nin": ["geo", "age"]}}
-            ).sort([("weight", -1), ("display.en", 1)]).limit(limit).to_list(length=limit)
+            # Exclude 'geo', 'age', and 'language'. Return ALL other tags (no limit).
+            cursor = cls.db.tags.find(
+                {"category": {"$nin": ["geo", "age", "language"]}}
+            )
+            return await cursor.to_list(length=None)
         
         q_lower = query.lower().strip()
         # Fast prefix matching on the flattened search_terms array
