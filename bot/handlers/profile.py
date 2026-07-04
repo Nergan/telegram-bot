@@ -21,7 +21,7 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 # In-memory atomic tracker to prevent database asynchronous write race conditions
-ACTIVE_MEDIA_GROUPS = set()
+ALBUM_BUFFER = {}
 
 @router.message(F.text.in_(_btn("btn_edit_active")))
 async def edit_info_menu(message: types.Message, lang: str):
@@ -87,33 +87,32 @@ async def capture_media(message: types.Message, state: FSMContext, lang: str):
     elif message.document: media_doc['file_id'] = message.document.file_id
     
     if message.media_group_id:
-        # Atomic synchronous check: guarantees ONLY the first message executes the replacement block
-        if message.media_group_id not in ACTIVE_MEDIA_GROUPS:
-            ACTIVE_MEDIA_GROUPS.add(message.media_group_id)
+        if message.media_group_id not in ALBUM_BUFFER:
+            # First message initiates the buffer list
+            ALBUM_BUFFER[message.media_group_id] = [media_doc]
             
             try:
-                await state.update_data(media_group_id=message.media_group_id)
-                await Database.db.profiles.update_one(
-                    {"public_uuid": active_prof['public_uuid']}, 
-                    {"$set": {"media": [media_doc]}}
-                )
-                
                 await message.answer(_("album_proc", lang))
+                # Wait for all other messages of this album to arrive and append to our memory buffer
                 await asyncio.sleep(1.5)
                 
-                fresh_data = await state.get_data()
-                if fresh_data.get("media_group_id") == message.media_group_id:
+                # Retrieve the full compiled list and remove it from memory
+                buffered_docs = ALBUM_BUFFER.pop(message.media_group_id, [])
+                
+                if buffered_docs:
+                    # Write the entire list to the database ONCE. No race conditions.
+                    await Database.db.profiles.update_one(
+                        {"public_uuid": active_prof['public_uuid']}, 
+                        {"$set": {"media": buffered_docs}}
+                    )
                     await state.clear()
                     await message.answer(_("album_saved", lang), reply_markup=edit_info_menu_kb(lang))
-            finally:
-                # Ensure the in-memory set is cleaned up even if database calls fail
-                ACTIVE_MEDIA_GROUPS.discard(message.media_group_id)
+            except Exception as e:
+                ALBUM_BUFFER.pop(message.media_group_id, None)
+                logger.error(f"Album processing error: {e}")
         else:
-            # Subsequent messages are securely routed here to append to the database
-            await Database.db.profiles.update_one(
-                {"public_uuid": active_prof['public_uuid']}, 
-                {"$push": {"media": media_doc}}
-            )
+            # Subsequent messages instantly append to the memory list synchronously
+            ALBUM_BUFFER[message.media_group_id].append(media_doc)
     else:
         # Single media upload: completely replace existing media
         await Database.db.profiles.update_one(

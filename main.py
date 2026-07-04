@@ -69,6 +69,16 @@ app.include_router(webapp_router)
 async def root():
     return {"status": "ok"}
 
+# Helper to prevent silent task failures
+def _on_task_done(task: asyncio.Task):
+    bg_tasks.discard(task)
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.error(f"Background webhook task failed: {e}", exc_info=True)
+
 @app.post("/webhook/{secret}")
 async def bot_webhook(secret: str, request: Request):
     if secret != WEBHOOK_SECRET:
@@ -80,6 +90,8 @@ async def bot_webhook(secret: str, request: Request):
     # Send to task tracker to ensure completion before SIGTERM
     task = asyncio.create_task(dp.feed_update(bot, update))
     bg_tasks.add(task)
-    task.add_done_callback(bg_tasks.discard)
+    
+    # Attach safety callback
+    task.add_done_callback(_on_task_done)
     
     return {"ok": True}

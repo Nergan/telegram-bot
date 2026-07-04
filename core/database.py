@@ -46,10 +46,9 @@ class Database:
                 batch.append(item)
                 
                 while len(batch) < 50:
-                    try:
-                        batch.append(cls.log_queue.get_nowait())
-                    except asyncio.QueueEmpty:
+                    if cls.log_queue.empty():
                         break
+                    batch.append(cls.log_queue.get_nowait())
                         
                 if batch:
                     await cls.db.logs.insert_many(batch)
