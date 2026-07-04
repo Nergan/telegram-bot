@@ -38,7 +38,7 @@ async def send_profile(chat_id: int, profile: dict, kb, lang: str, custom_prefix
                 translated_tags.append(tid)
         
         if translated_tags:
-            text += _("lbl_tags", lang, ' #'.join(translated_tags))
+            text += _("lbl_tags", lang, ' • '.join(translated_tags))
             
     media = profile.get("media", [])
     opts = LinkPreviewOptions(is_disabled=True)

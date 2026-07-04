@@ -416,12 +416,13 @@
             const filtered = list.filter(r => {
                 const otherProf = r.other_profile || {};
                 const bio = (otherProf.bio || '').toLowerCase();
+                // Replaced '#' prefixes and space joiner with ' • '
                 const tags = Array.isArray(otherProf.tags) ? otherProf.tags.map(t => {
                     if (typeof t === 'object' && t.display) {
-                        return `#${(t.display[lang] || t.display['en'] || t.id)}`.toLowerCase();
+                        return (t.display[lang] || t.display['en'] || t.id).toLowerCase();
                     }
-                    return `#${t}`.toLowerCase();
-                }).join(' ') : '';
+                    return String(t).toLowerCase();
+                }).join(' • ') : '';
                 const pUuid = (otherProf.public_uuid || '').toLowerCase();
                 const publicCon = Array.isArray(otherProf.public_contacts) ? otherProf.public_contacts.join(' ').toLowerCase() : '';
                 const msg = (r.message || '').toLowerCase();
@@ -452,7 +453,8 @@
                         }
                     });
                 }
-                let tagsHtml = translatedTags.map(t => `#${t}`).join(' ');
+                // Removed the leading '#' and updated the joiner to ' • '
+                let tagsHtml = translatedTags.join(' • ');
 
                 let publicContactsHtml = Array.isArray(otherProf.public_contacts) ? otherProf.public_contacts.map(c => `• <code>${escapeHtml(c)}</code>`).join('<br>') : '';
                 let messageBlock = r.message ? `<div class="req-msg">${_i('msg')} ${escapeHtml(r.message)}</div>` : '';
