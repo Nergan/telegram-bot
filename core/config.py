@@ -10,7 +10,9 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "dating_bot_secure_path_abc123")
 
 BOT_COMMANDS = [
     ("start", "Start or restart the bot"),
-    ("help", "Help information")
+    ("help", "Help information"),
+    ("lang_en", "Set English"),
+    ("lang_ru", "Set Russian")
 ]
 
 # Advanced Tags Dictionary (Multi-language Support)

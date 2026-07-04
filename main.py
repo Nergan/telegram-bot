@@ -7,7 +7,7 @@ from aiogram.types import Update
 from core.config import WEBHOOK_URL, WEBHOOK_SECRET
 from core.database import Database
 from bot.bot_setup import bot, dp, setup_bot_commands
-from bot.middlewares import LoggingMiddleware
+from bot.middlewares import AdvancedMiddleware
 from bot.handlers import router as bot_router
 from webapp.api import router as webapp_router
 
@@ -15,29 +15,46 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Apply Middleware and Router
-dp.update.middleware(LoggingMiddleware())
+dp.update.middleware(AdvancedMiddleware())
 dp.include_router(bot_router)
+
+# Task tracker for graceful shutdown
+bg_tasks = set()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Connect DB
     Database.connect()
+    Database.log_task = asyncio.create_task(Database.log_worker())
+    await Database.migrate_random_indexes()
+    
     await setup_bot_commands()
     
-    # Указываем Telegram явно присылать и сообщения, и нажатия кнопок
     webhook_url = f"{WEBHOOK_URL}/webhook/{WEBHOOK_SECRET}"
     await bot.set_webhook(
         url=webhook_url, 
         drop_pending_updates=True,
-        allowed_updates=["message", "callback_query"]  # <-- ДОБАВИТЬ ЭТУ СТРОКУ
+        allowed_updates=["message", "callback_query"]
     )
-    logger.info("Webhook registered and commands updated.")
+    logger.info("Webhook registered.")
     
     yield
     
+    # Graceful Shutdown
+    logger.info("Shutdown signal received.")
+    if bg_tasks:
+        logger.info(f"Awaiting {len(bg_tasks)} background webhook tasks...")
+        await asyncio.gather(*bg_tasks, return_exceptions=True)
+        
+    if Database.log_task:
+        Database.log_task.cancel()
+        try:
+            await Database.log_task
+        except asyncio.CancelledError:
+            pass
+            
     await bot.session.close()
     Database.disconnect()
-    logger.info("Application shutdown complete.")
+    logger.info("Shutdown complete.")
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(webapp_router)
@@ -45,17 +62,19 @@ app.include_router(webapp_router)
 @app.get("/")
 @app.head("/")
 async def root():
-    return {"status": "ok", "message": "Bot is running"}
+    return {"status": "ok"}
 
 @app.post("/webhook/{secret}")
 async def bot_webhook(secret: str, request: Request):
     if secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid webhook secret")
+        raise HTTPException(status_code=403)
         
     update_data = await request.json()
     update = Update.model_validate(update_data, context={"bot": bot})
     
-    # Запускаем обработку асинхронно в фоне, мгновенно возвращая 200 OK в Telegram
-    asyncio.create_task(dp.feed_update(bot, update))
+    # Send to task tracker to ensure completion before SIGTERM
+    task = asyncio.create_task(dp.feed_update(bot, update))
+    bg_tasks.add(task)
+    task.add_done_callback(bg_tasks.discard)
     
     return {"ok": True}

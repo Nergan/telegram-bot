@@ -1,3 +1,4 @@
+import random
 import uuid
 import html
 import logging
@@ -43,14 +44,26 @@ async def browse_next(message: types.Message, state: FSMContext, lang: str):
         if filters.get("any_tags"): 
             and_clauses.append({"tags": {"$in": filters["any_tags"]}})
             
-        pipeline = [{"$match": {"$and": and_clauses + [{"public_uuid": {"$nin": seen_uuids}}]}}, {"$sample": {"size": 1}}]
-        cursor = Database.db.profiles.aggregate(pipeline)
+        r_idx = random.random()
+        match_fwd = {"$and": and_clauses + [{"public_uuid": {"$nin": seen_uuids}}, {"random_index": {"$gte": r_idx}}]}
+        cursor = Database.db.profiles.find(match_fwd).sort("random_index", 1).limit(1)
         profiles = await cursor.to_list(length=1)
         
         if not profiles:
-            pipeline_all = [{"$match": {"$and": and_clauses}}, {"$sample": {"size": 1}}]
-            cursor_all = Database.db.profiles.aggregate(pipeline_all)
+            match_bwd = {"$and": and_clauses + [{"public_uuid": {"$nin": seen_uuids}}, {"random_index": {"$lt": r_idx}}]}
+            cursor = Database.db.profiles.find(match_bwd).sort("random_index", -1).limit(1)
+            profiles = await cursor.to_list(length=1)
+        
+        if not profiles:
+            # Reached end of pool, fallback to reset seen items
+            match_all_fwd = {"$and": and_clauses + [{"random_index": {"$gte": r_idx}}]}
+            cursor_all = Database.db.profiles.find(match_all_fwd).sort("random_index", 1).limit(1)
             all_profiles = await cursor_all.to_list(length=1)
+            
+            if not all_profiles:
+                match_all_bwd = {"$and": and_clauses + [{"random_index": {"$lt": r_idx}}]}
+                cursor_all_bwd = Database.db.profiles.find(match_all_bwd).sort("random_index", -1).limit(1)
+                all_profiles = await cursor_all_bwd.to_list(length=1)
             
             if not all_profiles:
                 pool_size = await Database.get_pool_size(user_id)
