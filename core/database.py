@@ -190,8 +190,17 @@ class Database:
         await cls.db.profiles.delete_many({"user_id": user_id, "is_active": False})
         
     @classmethod
-    async def get_pool_size(cls, user_id: int) -> int:
-        return await cls.db.profiles.count_documents({"user_id": {"$ne": user_id}, "is_active": True})
+    async def get_pool_size(cls, user_id: int, filters: dict = None) -> int:
+        and_clauses = [{"user_id": {"$ne": user_id}}, {"is_active": True}]
+        if filters:
+            if filters.get("require_tags"): 
+                and_clauses.append({"tags": {"$all": filters["require_tags"]}})
+            if filters.get("exclude_tags"): 
+                and_clauses.append({"tags": {"$nin": filters["exclude_tags"]}})
+            if filters.get("any_tags"): 
+                and_clauses.append({"tags": {"$in": filters["any_tags"]}})
+        
+        return await cls.db.profiles.count_documents({"$and": and_clauses})
         
     @classmethod
     async def add_seen_profile(cls, user_id: int, seen_uuid: str):

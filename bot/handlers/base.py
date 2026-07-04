@@ -32,7 +32,8 @@ async def show_main_menu(message: types.Message, state: FSMContext, lang: str):
         
     active_profile = await Database.get_or_create_active_profile(message.from_user.id, message.from_user.username)
     
-    pool_size = await Database.get_pool_size(message.from_user.id)
+    # Pass the filters here to update the Browse button count
+    pool_size = await Database.get_pool_size(message.from_user.id, active_profile.get("filters", {}))
     sent_c, recv_c = await Database.get_requests_counts(message.from_user.id)
     
     await message.answer(_("menu_active", lang), reply_markup=main_menu_kb(lang, pool_size))
@@ -70,7 +71,8 @@ async def unhandled_message(message: types.Message, state: FSMContext, lang: str
     else:
         active = await Database.get_active_profile(message.from_user.id)
         if active:
-            pool_size = await Database.get_pool_size(message.from_user.id)
+            # Pass the filters here as well
+            pool_size = await Database.get_pool_size(message.from_user.id, active.get("filters", {}))
             await message.answer(_("err_unknown", lang), reply_markup=main_menu_kb(lang, pool_size))
         else:
             await message.answer(_("err_start", lang))

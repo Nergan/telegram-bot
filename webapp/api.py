@@ -155,7 +155,8 @@ async def get_requests_endpoint(payload: RequestsPayload):
                     "public_uuid": other_profile.get("public_uuid", ""),
                     "bio": other_profile.get("text", "") or "",
                     "tags": formatted_tags,
-                    "public_contacts": [c.get("value", "") for c in other_profile.get("contacts", []) if c.get("is_public")]
+                    "public_contacts": [c.get("value", "") for c in other_profile.get("contacts", []) if c.get("is_public")],
+                    "media_count": len(other_profile.get("media", []))
                 }
             })
             
@@ -180,7 +181,8 @@ async def get_requests_endpoint(payload: RequestsPayload):
                     "public_uuid": other_profile.get("public_uuid", ""),
                     "bio": other_profile.get("text", "") or "",
                     "tags": formatted_tags,
-                    "public_contacts": [c.get("value", "") for c in other_profile.get("contacts", []) if c.get("is_public")]
+                    "public_contacts": [c.get("value", "") for c in other_profile.get("contacts", []) if c.get("is_public")],
+                    "media_count": len(other_profile.get("media", []))
                 }
             })
             

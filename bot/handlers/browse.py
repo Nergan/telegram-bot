@@ -66,7 +66,7 @@ async def browse_next(message: types.Message, state: FSMContext, lang: str):
                 all_profiles = await cursor_all_bwd.to_list(length=1)
             
             if not all_profiles:
-                pool_size = await Database.get_pool_size(user_id)
+                pool_size = await Database.get_pool_size(user_id, active.get("filters", {}))
                 return await message.answer(_("browse_none", lang), reply_markup=main_menu_kb(lang, pool_size))
             else:
                 await Database.clear_seen_profiles(user_id)

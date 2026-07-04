@@ -116,7 +116,8 @@
                 m_warn: "⚠️ No private contacts to share. Add one via bot first.",
                 m_c: "Confirm", m_x: "Cancel", err: "An error occurred.",
                 al_sel: "Select at least one contact to share.", al_dec: "Decline this request?", al_v: "Mark this request as viewed? It will be removed from this list.",
-                info: "Alert", confirm_action: "Confirmation"
+                info: "Alert", confirm_action: "Confirmation",
+                media_attached: "{} media file(s) attached"
             },
             ru: {
                 edit_title: "Редактировать теги", filter_title: "Фильтры",
@@ -132,7 +133,8 @@
                 m_warn: "⚠️ Нет приватных контактов. Сначала добавьте их в боте.",
                 m_c: "Подтвердить", m_x: "Отмена", err: "Произошла ошибка.",
                 al_sel: "Выберите хотя бы один контакт для обмена.", al_dec: "Отклонить этот запрос?", al_v: "Удалить этот запрос из списка?",
-                info: "Внимание", confirm_action: "Подтверждение"
+                info: "Внимание", confirm_action: "Подтверждение",
+                media_attached: "Прикреплено медиа: {}"
             },
             pt: {
                 edit_title: "Editar Tags do Perfil", filter_title: "Filtro Avançado",
@@ -148,7 +150,8 @@
                 m_warn: "⚠️ Nenhum contato privado para compartilhar. Adicione um primeiro no bot.",
                 m_c: "Confirmar", m_x: "Cancelar", err: "Ocorreu um erro.",
                 al_sel: "Selecione pelo menos um contato para compartilhar.", al_dec: "Recusar esta solicitação?", al_v: "Marcar esta solicitação como visualizada? Ela será removida desta lista.",
-                info: "Alerta", confirm_action: "Confirmação"
+                info: "Alerta", confirm_action: "Confirmação",
+                media_attached: "{} arquivo(s) de mídia anexado(s)"
             }
         };
         const _i = (k) => I18N[lang][k] || I18N['en'][k];
@@ -483,11 +486,19 @@
                     </div>`;
                 }
 
+                // Inject the notification badge if media is found
+                let mediaHtml = '';
+                if (otherProf.media_count > 0) {
+                    let mediaText = _i('media_attached').replace('{}', otherProf.media_count);
+                    mediaHtml = `<div style="font-size:12px; font-weight:bold; color:var(--tg-theme-link-color, #2481cc); margin-bottom:10px;">📸 ${mediaText}</div>`;
+                }
+
                 card.innerHTML = `
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                         <span style="font-weight:bold; font-size:14px;">ID: ${escapeHtml(otherProf.public_uuid || '')}</span>
                         <span class="req-status" style="color:${reqTypeColor};">${reqTypeLabel}</span>
                     </div>
+                    ${mediaHtml}
                     <p class="req-bio">${otherProf.bio ? escapeHtml(otherProf.bio) : _i('bio_emp')}</p>
                     <div style="font-size:12px; color:gray; margin-bottom:10px;">${escapeHtml(tagsHtml)}</div>
                     ${publicContactsHtml ? `<div style="font-size:13px; margin-bottom:10px;">${_i('pub_c')}<br>${publicContactsHtml}</div>` : ''}
