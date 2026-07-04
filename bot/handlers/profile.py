@@ -72,6 +72,9 @@ async def capture_media(message: types.Message, state: FSMContext, lang: str):
         return await message.answer(_("invalid_media", lang))
         
     active_prof = await Database.get_active_profile(message.from_user.id)
+    if not active_prof:
+        return await message.answer(_("prof_not_found", lang))
+
     media_doc = {"type": message.content_type}
     if message.photo: media_doc['file_id'] = message.photo[-1].file_id
     elif message.video: media_doc['file_id'] = message.video.file_id
@@ -81,18 +84,38 @@ async def capture_media(message: types.Message, state: FSMContext, lang: str):
     elif message.document: media_doc['file_id'] = message.document.file_id
     
     if message.media_group_id:
-        # Album loader logic
-        await state.update_data(media_group_id=message.media_group_id)
-        # Simply wait for the full set, in an MVP we can append to DB list
-        await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$push": {"media": media_doc}})
+        # Check FSM context data to see if we've already started processing this album
+        state_data = await state.get_data()
+        current_group_id = state_data.get("media_group_id")
         
-        # Debounce/throttle messages for group
-        await message.answer(_("album_proc", lang))
-        await asyncio.sleep(1.5)
-        await state.clear()
-        await message.answer(_("album_saved", lang), reply_markup=edit_info_menu_kb(lang))
+        if current_group_id != message.media_group_id:
+            # FIRST message of the album: Wipe existing media and set the first item
+            await state.update_data(media_group_id=message.media_group_id)
+            await Database.db.profiles.update_one(
+                {"public_uuid": active_prof['public_uuid']}, 
+                {"$set": {"media": [media_doc]}}
+            )
+            
+            await message.answer(_("album_proc", lang))
+            await asyncio.sleep(1.5)
+            
+            # Verify the state context is still valid for this album before closing it out
+            fresh_data = await state.get_data()
+            if fresh_data.get("media_group_id") == message.media_group_id:
+                await state.clear()
+                await message.answer(_("album_saved", lang), reply_markup=edit_info_menu_kb(lang))
+        else:
+            # SUBSEQUENT messages of the same album: Append them to the newly replaced list
+            await Database.db.profiles.update_one(
+                {"public_uuid": active_prof['public_uuid']}, 
+                {"$push": {"media": media_doc}}
+            )
     else:
-        await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"media": [media_doc]}})
+        # Single media upload: Completely replace existing media with the single new item
+        await Database.db.profiles.update_one(
+            {"public_uuid": active_prof['public_uuid']}, 
+            {"$set": {"media": [media_doc]}}
+        )
         await message.answer(_("media_saved", lang), reply_markup=edit_info_menu_kb(lang))
         await state.clear()
 
