@@ -30,6 +30,7 @@
         .btn-primary { background-color: var(--tg-theme-button-color, #2481cc); color: white; }
         .btn-secondary { background-color: #4CAF50; color: white; }
         .btn-danger { background-color: #F44336; color: white; }
+        .btn-info { background-color: #673AB7; color: white; } /* Deep Purple */
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
         .modal-content { background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #000); padding: 20px; border-radius: 12px; width: 90%; max-width: 400px; box-sizing: border-box; }
         .checkbox-row { display: flex; align-items: center; margin-bottom: 10px; cursor: pointer; }
@@ -82,7 +83,7 @@
         </div>
     </div>
 
-    <!-- CUSTOM NON-ALERT INTERFACE OVERLAY (Hides hosting domains) -->
+    <!-- CUSTOM NON-ALERT INTERFACE OVERLAY -->
     <div id="custom-dialog-overlay" class="modal-overlay hidden" style="z-index: 1100;">
         <div class="modal-content" style="text-align: center;">
             <h4 id="dialog-title" style="margin-bottom: 10px;"></h4>
@@ -117,7 +118,8 @@
                 m_c: "Confirm", m_x: "Cancel", err: "An error occurred.",
                 al_sel: "Select at least one contact to share.", al_dec: "Decline this request?", al_v: "Mark this request as viewed? It will be removed from this list.",
                 info: "Alert", confirm_action: "Confirmation",
-                media_attached: "{} media file(s) attached"
+                media_attached: "{} media file(s) attached",
+                btn_chat: "📩 Chat", pm_sent: "✅ Profile successfully sent to your Telegram chat!"
             },
             ru: {
                 edit_title: "Редактировать теги", filter_title: "Фильтры",
@@ -134,7 +136,8 @@
                 m_c: "Подтвердить", m_x: "Отмена", err: "Произошла ошибка.",
                 al_sel: "Выберите хотя бы один контакт для обмена.", al_dec: "Отклонить этот запрос?", al_v: "Удалить этот запрос из списка?",
                 info: "Внимание", confirm_action: "Подтверждение",
-                media_attached: "Прикреплено медиа: {}"
+                media_attached: "Прикреплено медиа: {}",
+                btn_chat: "📩 В чат", pm_sent: "✅ Анкета успешно отправлена в ваш чат!"
             },
             pt: {
                 edit_title: "Editar Tags do Perfil", filter_title: "Filtro Avançado",
@@ -151,7 +154,8 @@
                 m_c: "Confirmar", m_x: "Cancelar", err: "Ocorreu um erro.",
                 al_sel: "Selecione pelo menos um contato para compartilhar.", al_dec: "Recusar esta solicitação?", al_v: "Marcar esta solicitação como visualizada? Ela será removida desta lista.",
                 info: "Alerta", confirm_action: "Confirmação",
-                media_attached: "{} arquivo(s) de mídia anexado(s)"
+                media_attached: "{} arquivo(s) de mídia anexado(s)",
+                btn_chat: "📩 Chat", pm_sent: "✅ Perfil enviado com sucesso para o seu chat!"
             }
         };
         const _i = (k) => I18N[lang][k] || I18N['en'][k];
@@ -296,14 +300,12 @@
             const availCont = document.getElementById('available-container');
             selCont.innerHTML = ''; availCont.innerHTML = '';
 
-            // Sort selected tags alphabetically by display name in the current language
             const sortedSelected = [...selectedTags].sort((a, b) => {
                 const valA = a.display[lang] || a.display['en'] || '';
                 const valB = b.display[lang] || b.display['en'] || '';
                 return valA.localeCompare(valB, lang);
             });
 
-            // Sort available tags alphabetically when search bar is empty
             const isSearching = document.getElementById('searchInput').value.trim() !== "";
             let sortedAvailable = [...availableTags];
             if (!isSearching) {
@@ -419,7 +421,6 @@
             const filtered = list.filter(r => {
                 const otherProf = r.other_profile || {};
                 const bio = (otherProf.bio || '').toLowerCase();
-                // Replaced '#' prefixes and space joiner with ' • '
                 const tags = Array.isArray(otherProf.tags) ? otherProf.tags.map(t => {
                     if (typeof t === 'object' && t.display) {
                         return (t.display[lang] || t.display['en'] || t.id).toLowerCase();
@@ -456,24 +457,25 @@
                         }
                     });
                 }
-                // Removed the leading '#' and updated the joiner to ' • '
                 let tagsHtml = translatedTags.join(' • ');
 
                 let publicContactsHtml = Array.isArray(otherProf.public_contacts) ? otherProf.public_contacts.map(c => `• <code>${escapeHtml(c)}</code>`).join('<br>') : '';
                 let messageBlock = r.message ? `<div class="req-msg">${_i('msg')} ${escapeHtml(r.message)}</div>` : '';
                 
+                let chatBtn = `<button class="btn btn-info" onclick="sendProfileToChat('${r.req_id}')">${_i('btn_chat')}</button>`;
+                
                 let buttonsHtml = '';
                 if (currentTab === 'received') {
                     if (r.action === 'send') {
-                        buttonsHtml = `<button class="btn btn-primary" onclick="handleActionNoModal('viewed', '${r.req_id}')">${_i('btn_v')}</button>`;
+                        buttonsHtml = `<button class="btn btn-primary" onclick="handleActionNoModal('viewed', '${r.req_id}')">${_i('btn_v')}</button>` + chatBtn;
                     } else {
                         buttonsHtml = `
                             <button class="btn btn-secondary" onclick="openModal('${r.req_id}')">${_i('btn_a')}</button>
                             <button class="btn btn-danger" onclick="handleActionNoModal('decline', '${r.req_id}')">${_i('btn_d')}</button>
-                        `;
+                        ` + chatBtn;
                     }
                 } else {
-                    buttonsHtml = `<span style="font-size:12px; color:gray;">${_i('wait')}</span>`;
+                    buttonsHtml = `<span style="font-size:12px; color:gray; margin-right: 10px;">${_i('wait')}</span>` + chatBtn;
                 }
 
                 let reqTypeLabel = r.action === 'send' ? _i('ow_share') : _i('mut_req');
@@ -486,7 +488,6 @@
                     </div>`;
                 }
 
-                // Inject the notification badge if media is found
                 let mediaHtml = '';
                 if (otherProf.media_count > 0) {
                     let mediaText = _i('media_attached').replace('{}', otherProf.media_count);
@@ -570,6 +571,23 @@
                 });
                 if (res.ok) await loadRequests(); 
                 else {
+                    let err = await res.json();
+                    showCustomAlert(err.detail || _i('err'));
+                }
+            } catch (e) { showCustomAlert(_i('err')); }
+        }
+
+        // New function to handle the "Send to Chat" logic
+        async function sendProfileToChat(reqId) {
+            try {
+                let res = await fetch('/api/send_profile_to_chat', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ initData: tg.initData, req_id: reqId })
+                });
+                if (res.ok) {
+                    // Confirms it was sent, keeps WebApp open
+                    showCustomAlert(_i('pm_sent'));
+                } else {
                     let err = await res.json();
                     showCustomAlert(err.detail || _i('err'));
                 }

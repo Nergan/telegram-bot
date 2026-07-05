@@ -37,6 +37,10 @@ class HandleRequestPayload(BaseModel):
     action: str  # "accept", "decline", "viewed"
     selected_contact_ids: Optional[List[str]] = None
 
+class SendToChatPayload(BaseModel):
+    initData: str
+    req_id: str
+
 @router.get("/webapp", response_class=HTMLResponse)
 async def serve_webapp():
     with open(os.path.join(os.path.dirname(__file__), "static", "index.html"), "r", encoding="utf-8") as f:
@@ -51,7 +55,6 @@ async def get_profile_data(payload: WebAppPayload):
     p = await Database.get_profile_by_uuid(payload.profile_id)
     if not p: raise HTTPException(status_code=404)
     
-    # Fetch full tag objects so WebApp can render them directly
     active_tags_data = await Database.get_tags_by_ids(p.get("tags", []))
     active_tags = [{"id": t["_id"], "display": t["display"]} for t in active_tags_data]
     
@@ -148,7 +151,6 @@ async def get_requests_endpoint(payload: RequestsPayload):
             other_profile = await Database.get_active_profile(target_id)
             if not other_profile: continue
             
-            # Fetch and map full display values for tag tags
             tags_data = await Database.get_tags_by_ids(other_profile.get("tags", []))
             formatted_tags = [{"id": t["_id"], "display": t["display"]} for t in tags_data]
                 
@@ -174,7 +176,6 @@ async def get_requests_endpoint(payload: RequestsPayload):
             other_profile = await Database.get_active_profile(initiator_id)
             if not other_profile: continue
             
-            # Fetch and map full display values for tag tags
             tags_data = await Database.get_tags_by_ids(other_profile.get("tags", []))
             formatted_tags = [{"id": t["_id"], "display": t["display"]} for t in tags_data]
                 
@@ -225,7 +226,6 @@ async def handle_request_endpoint(payload: HandleRequestPayload):
                 raise HTTPException(status_code=403, detail="Permission denied")
                 
             await Database.db.contact_requests.update_one({"req_id": payload.req_id}, {"$set": {"status": "declined"}})
-            
             try:
                 await bot.send_message(req['initiator_id'], _("mut_declined", init_lang))
             except Exception:
@@ -279,4 +279,35 @@ async def handle_request_endpoint(payload: HandleRequestPayload):
         raise HTTPException(status_code=400, detail="Invalid action")
     except Exception as e:
         logger.exception("Error occurred in handle_request_endpoint")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/send_profile_to_chat")
+async def send_profile_to_chat_endpoint(payload: SendToChatPayload):
+    try:
+        user_data = validate_webapp_data(payload.initData)
+        if not user_data: raise HTTPException(status_code=401)
+        
+        user_id = user_data['id']
+        if await Database.is_user_banned(user_id): raise HTTPException(status_code=403, detail="Banned")
+        
+        req = await Database.db.contact_requests.find_one({"req_id": payload.req_id})
+        if not req: raise HTTPException(status_code=404, detail="Request not found")
+        
+        # Determine the target user whose profile we want to view
+        target_user_id = req['target_id'] if req['initiator_id'] == user_id else req['initiator_id']
+        
+        profile_to_send = await Database.get_active_profile(target_user_id)
+        if not profile_to_send:
+            raise HTTPException(status_code=404, detail="Target profile no longer exists.")
+        
+        lang = await Database.get_user_lang(user_id)
+        
+        # Send profile natively. (kb=None because we don't need buttons in this context)
+        await send_profile(user_id, profile_to_send, kb=None, lang=lang)
+        
+        return {"status": "ok"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error in send_profile_to_chat")
         raise HTTPException(status_code=500, detail=str(e))
