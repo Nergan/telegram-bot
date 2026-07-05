@@ -117,22 +117,25 @@ class Database:
         cls._ban_cache_time[user_id] = time.time()
 
     @classmethod
-    async def get_or_create_active_profile(cls, user_id: int, username: str = None) -> dict:
+    async def get_or_create_active_profile(cls, user_id: int, username: str = None) -> dict | None:
         active = await cls.db.profiles.find_one({"user_id": user_id, "is_active": True})
         if active: 
             if username:
                 await cls.sync_telegram_username(active, username)
-            return await cls.db.profiles.find_one({"_id": active["_id"]})
+                return await cls.db.profiles.find_one({"_id": active["_id"]})
+            return active
         
-        any_profile = await cls.db.profiles.find_one({"user_id": user_id})
-        if any_profile:
-            await cls.set_active_profile(user_id, any_profile['public_uuid'])
-            active_fresh = await cls.db.profiles.find_one({"public_uuid": any_profile['public_uuid']})
-            if username:
-                await cls.sync_telegram_username(active_fresh, username)
-            return await cls.db.profiles.find_one({"public_uuid": any_profile['public_uuid']})
+        # If they have literally 0 profiles, create one natively (for new users)
+        if await cls.db.profiles.count_documents({"user_id": user_id}) == 0:
+            return await cls.create_profile(user_id, username)
             
-        return await cls.create_profile(user_id, username)
+        # Otherwise, they have profiles, but explicitly deactivated them. Return None.
+        return None
+    
+    @classmethod
+    async def deactivate_profile(cls, user_id: int, profile_uuid: str):
+        await cls.db.profiles.update_one({"user_id": user_id, "public_uuid": profile_uuid}, {"$set": {"is_active": False}})
+        logger.info(f"User {user_id} deactivated profile {profile_uuid}.")
 
     @classmethod
     async def create_profile(cls, user_id: int, username: str = None) -> dict | None:
@@ -207,15 +210,19 @@ class Database:
         if await cls.db.profiles.count_documents({"user_id": user_id}) <= 1:
             return False 
         await cls.db.profiles.delete_one({"user_id": user_id, "public_uuid": public_uuid})
-        active = await cls.db.profiles.find_one({"user_id": user_id, "is_active": True})
-        if not active:
-            any_prof = await cls.db.profiles.find_one({"user_id": user_id})
-            if any_prof: await cls.set_active_profile(user_id, any_prof['public_uuid'])
+        # We no longer auto-activate a random profile. Let them be inactive until they choose one.
         return True
 
     @classmethod
     async def delete_all_but_active(cls, user_id: int):
-        await cls.db.profiles.delete_many({"user_id": user_id, "is_active": False})
+        active = await cls.get_active_profile(user_id)
+        if active:
+            await cls.db.profiles.delete_many({"user_id": user_id, "is_active": False})
+        else:
+            # Prevent deleting *all* profiles if they run this command while having NO active profile. Keep the most recent one.
+            last_profile = await cls.db.profiles.find_one({"user_id": user_id}, sort=[("created_at", -1)])
+            if last_profile:
+                await cls.db.profiles.delete_many({"user_id": user_id, "_id": {"$ne": last_profile["_id"]}})
         
     @classmethod
     async def get_pool_size(cls, user_id: int, filters: dict = None) -> int:

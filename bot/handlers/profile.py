@@ -25,20 +25,26 @@ ALBUM_BUFFER = {}
 
 @router.message(F.text.in_(_btn("btn_edit_active")))
 async def edit_info_menu(message: types.Message, lang: str):
+    active_prof = await Database.get_active_profile(message.from_user.id)
+    if not active_prof: return await message.answer(_("prof_not_found", lang))
     await message.answer(_("menu_edit", lang), reply_markup=edit_info_menu_kb(lang))
 
 @router.message(F.text.in_(_btn("btn_bio")))
 async def init_edit_bio(message: types.Message, state: FSMContext, lang: str):
-    await state.set_state(ProfileSetup.waiting_for_bio)
     active_prof = await Database.get_active_profile(message.from_user.id)
-    has_bio = bool(active_prof.get("text")) if active_prof else False
+    if not active_prof: return await message.answer(_("prof_not_found", lang))
+    
+    await state.set_state(ProfileSetup.waiting_for_bio)
+    has_bio = bool(active_prof.get("text"))
     await message.answer(_("send_bio", lang), reply_markup=edit_fsm_kb(lang, show_clear=has_bio))
 
 @router.message(F.text.in_(_btn("btn_media")))
 async def init_edit_media(message: types.Message, state: FSMContext, lang: str):
-    await state.set_state(ProfileSetup.waiting_for_media)
     active_prof = await Database.get_active_profile(message.from_user.id)
-    has_media = bool(active_prof.get("media")) if active_prof else False
+    if not active_prof: return await message.answer(_("prof_not_found", lang))
+    
+    await state.set_state(ProfileSetup.waiting_for_media)
+    has_media = bool(active_prof.get("media"))
     await message.answer(_("send_media", lang), reply_markup=edit_fsm_kb(lang, show_clear=has_media))
 
 @router.message(ProfileSetup.waiting_for_bio)
@@ -55,8 +61,9 @@ async def capture_text(message: types.Message, state: FSMContext, lang: str):
         return await message.answer(_("invalid_text", lang))
     
     active_prof = await Database.get_active_profile(message.from_user.id)
-    await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"text": message.text}})
+    if not active_prof: return await message.answer(_("prof_not_found", lang))
     
+    await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {"text": message.text}})
     await message.answer(_("bio_saved", lang), reply_markup=edit_info_menu_kb(lang))
     await state.clear()
 
@@ -176,7 +183,7 @@ async def manage_prof_cb(callback: types.CallbackQuery, state: FSMContext, lang:
     await send_profile(callback.from_user.id, profile, profile_inline_kb(lang, prof_uuid, sent_c, recv_c), lang)
     await callback.answer()
 
-@router.message(F.text.in_(_btn("btn_set_active")) | F.text.in_(_btn("btn_regen_id")) | F.text.in_(_btn("btn_delete")) | F.text.in_(_btn("btn_view_again")))
+@router.message(F.text.in_(_btn("btn_set_active")) | F.text.in_(_btn("btn_deactivate")) | F.text.in_(_btn("btn_regen_id")) | F.text.in_(_btn("btn_delete")) | F.text.in_(_btn("btn_view_again")))
 async def manage_actions(message: types.Message, state: FSMContext, lang: str):
     data = await state.get_data()
     prof_uuid = data.get("managing_uuid")
@@ -191,6 +198,11 @@ async def manage_actions(message: types.Message, state: FSMContext, lang: str):
     if message.text == _("btn_set_active", lang):
         await Database.set_active_profile(user_id, prof_uuid)
         await message.answer(_("prof_activated", lang))
+        from bot.handlers.base import show_main_menu
+        await show_main_menu(message, state, lang)
+    elif message.text == _("btn_deactivate", lang):
+        await Database.deactivate_profile(user_id, prof_uuid)
+        await message.answer(_("prof_deactivated", lang))
         from bot.handlers.base import show_main_menu
         await show_main_menu(message, state, lang)
     elif message.text == _("btn_regen_id", lang):

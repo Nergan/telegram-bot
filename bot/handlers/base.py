@@ -32,12 +32,14 @@ async def show_main_menu(message: types.Message, state: FSMContext, lang: str):
         
     active_profile = await Database.get_or_create_active_profile(message.from_user.id, message.from_user.username)
     
-    # Pass the filters here to update the Browse button count
-    pool_size = await Database.get_pool_size(message.from_user.id, active_profile.get("filters", {}))
-    sent_c, recv_c = await Database.get_requests_counts(message.from_user.id)
-    
-    await message.answer(_("menu_active", lang), reply_markup=main_menu_kb(lang, pool_size))
-    await send_profile(message.chat.id, active_profile, profile_inline_kb(lang, active_profile['public_uuid'], sent_c, recv_c), lang)
+    if active_profile:
+        pool_size = await Database.get_pool_size(message.from_user.id, active_profile.get("filters", {}))
+        sent_c, recv_c = await Database.get_requests_counts(message.from_user.id)
+        
+        await message.answer(_("menu_active", lang), reply_markup=main_menu_kb(lang, pool_size, has_active=True))
+        await send_profile(message.chat.id, active_profile, profile_inline_kb(lang, active_profile['public_uuid'], sent_c, recv_c), lang)
+    else:
+        await message.answer(_("menu_no_active", lang), reply_markup=main_menu_kb(lang, 0, has_active=False))
 
 @router.message(StateFilter("*"), F.text.in_(_btn("btn_cancel")))
 async def fsm_cancel(message: types.Message, state: FSMContext, lang: str):
@@ -56,9 +58,11 @@ async def fsm_clear(message: types.Message, state: FSMContext, lang: str):
     field = field_map.get(curr_state)
     if field:
         active_prof = await Database.get_active_profile(message.from_user.id)
-        val = [] if field in ["media", "contacts"] else None
-        await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {field: val}})
-        logger.info(f"User {message.from_user.id} cleared {field}.")
+        if active_prof:
+            val = [] if field in ["media", "contacts"] else None
+            await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {field: val}})
+            logger.info(f"User {message.from_user.id} cleared {field}.")
+            
     await state.clear()
     from bot.handlers.profile import edit_info_menu
     await edit_info_menu(message, lang)
@@ -71,8 +75,11 @@ async def unhandled_message(message: types.Message, state: FSMContext, lang: str
     else:
         active = await Database.get_active_profile(message.from_user.id)
         if active:
-            # Pass the filters here as well
             pool_size = await Database.get_pool_size(message.from_user.id, active.get("filters", {}))
-            await message.answer(_("err_unknown", lang), reply_markup=main_menu_kb(lang, pool_size))
+            await message.answer(_("err_unknown", lang), reply_markup=main_menu_kb(lang, pool_size, True))
         else:
-            await message.answer(_("err_start", lang))
+            has_any = await Database.db.profiles.count_documents({"user_id": message.from_user.id}) > 0
+            if has_any:
+                await message.answer(_("err_unknown", lang), reply_markup=main_menu_kb(lang, 0, False))
+            else:
+                await message.answer(_("err_start", lang))

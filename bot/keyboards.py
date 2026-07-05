@@ -2,7 +2,12 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, Inlin
 from core.config import WEBHOOK_URL
 from core.locales import _
 
-def main_menu_kb(lang: str, pool_size: int = 0) -> ReplyKeyboardMarkup:
+def main_menu_kb(lang: str, pool_size: int = 0, has_active: bool = True) -> ReplyKeyboardMarkup:
+    if not has_active:
+        return ReplyKeyboardMarkup(keyboard=[
+            [KeyboardButton(text=_("btn_profiles", lang))]
+        ], resize_keyboard=True)
+        
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text=_("btn_browse", lang, pool_size))],
         [KeyboardButton(text=_("btn_edit_active", lang))],
@@ -35,6 +40,9 @@ def manage_action_kb(lang: str, is_active: bool = False) -> ReplyKeyboardMarkup:
     keyboard = []
     if not is_active:
         keyboard.append([KeyboardButton(text=_("btn_set_active", lang))])
+    else:
+        keyboard.append([KeyboardButton(text=_("btn_deactivate", lang))])
+        
     keyboard.append([KeyboardButton(text=_("btn_regen_id", lang)), KeyboardButton(text=_("btn_delete", lang))])
     keyboard.append([KeyboardButton(text=_("btn_view_again", lang))])
     keyboard.append([KeyboardButton(text=_("btn_view_active", lang))])

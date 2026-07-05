@@ -76,6 +76,8 @@ async def verify_contact(val: str, lang: str) -> tuple[bool, str]:
 @router.message(F.text.in_(_btn("btn_contacts")))
 async def manage_contacts_menu(message: types.Message, lang: str):
     active_prof = await Database.get_active_profile(message.from_user.id)
+    if not active_prof: return await message.answer(_("prof_not_found", lang))
+    
     await Database.sync_telegram_username(active_prof, message.from_user.username)
     active_prof = await Database.get_active_profile(message.from_user.id)
     
@@ -93,6 +95,9 @@ async def manage_contacts_menu(message: types.Message, lang: str):
 
 @router.callback_query(F.data == "add_contact_fsm")
 async def add_contact_fsm_start(callback: types.CallbackQuery, state: FSMContext, lang: str):
+    active_prof = await Database.get_active_profile(callback.from_user.id)
+    if not active_prof: return await callback.answer(_("prof_not_found", lang), show_alert=True)
+    
     await state.set_state(ProfileSetup.waiting_for_contact_val)
     await callback.message.answer(_("con_add_instr", lang), reply_markup=cancel_fsm_kb(lang))
     await callback.answer()
@@ -105,6 +110,10 @@ async def capture_new_contact(message: types.Message, state: FSMContext, lang: s
         return
     if message.content_type != 'text': 
         return await message.answer(_("invalid_text", lang))
+    
+    user_id = message.from_user.id
+    active_prof = await Database.get_active_profile(user_id)
+    if not active_prof: return await message.answer(_("prof_not_found", lang))
     
     user_id = message.from_user.id
     active_prof = await Database.get_active_profile(user_id)
@@ -156,6 +165,7 @@ async def capture_new_contact(message: types.Message, state: FSMContext, lang: s
 async def toggle_contact_visibility(callback: types.CallbackQuery, lang: str):
     cid = callback.data.replace("togglecon_", "", 1)
     active_prof = await Database.get_active_profile(callback.from_user.id)
+    if not active_prof: return await callback.answer(_("prof_not_found", lang), show_alert=True)
     
     contacts = active_prof.get("contacts", [])
     updated = False
@@ -187,6 +197,7 @@ async def delete_contact(callback: types.CallbackQuery, lang: str):
         return await callback.answer(_("con_no_del_tg", lang), show_alert=True)
         
     active_prof = await Database.get_active_profile(callback.from_user.id)
+    if not active_prof: return await callback.answer(_("prof_not_found", lang), show_alert=True)
     await Database.db.profiles.update_one(
         {"_id": active_prof["_id"]},
         {"$pull": {"contacts": {"id": cid}}}

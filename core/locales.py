@@ -104,9 +104,17 @@ TRANSLATIONS = {
         "err_unknown": "🤷 Unrecognized command. Please use the menu buttons below.",
         "err_start": "🤷 Send /start to begin.",
         
-        "err_banned": "❌ You are banned from using this bot."
+        "err_banned": "❌ You are banned from using this bot.",
+        
+        "btn_deactivate": "⚪ Deactivate",
+        "prof_deactivated": "⚪ Profile Deactivated!",
+        "menu_no_active": "⚠️ You have no active profile. Please go to '👥 Profiles' to activate or create one."
     },
     "ru": {
+        "btn_deactivate": "⚪ Деактивировать",
+        "prof_deactivated": "⚪ Анкета деактивирована!",
+        "menu_no_active": "⚠️ У вас нет активной анкеты. Перейдите в '👥 Мои анкеты', чтобы активировать или создать её.",
+        
         "btn_browse": "🔍 Смотреть ({})",
         "btn_edit_active": "📝 Редактировать анкету",
         "btn_profiles": "👥 Мои анкеты",
@@ -214,6 +222,10 @@ TRANSLATIONS = {
         "err_banned": "❌ Вы заблокированы в этом боте."
     },
     "pt": {
+        "btn_deactivate": "⚪ Desativar",
+        "prof_deactivated": "⚪ Perfil Desativado!",
+        "menu_no_active": "⚠️ Você não tem nenhum perfil ativo. Vá para '👥 Perfis' para ativar ou criar um.",
+        
         "btn_browse": "🔍 Ver ({})",
         "btn_edit_active": "📝 Editar Perfil Ativo",
         "btn_profiles": "👥 Perfis",
