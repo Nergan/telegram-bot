@@ -39,13 +39,13 @@ async def init_edit_media(message: types.Message, state: FSMContext, lang: str, 
     has_media = bool(active_prof.get("media"))
     await message.answer(_("send_media", lang), reply_markup=edit_fsm_kb(lang, show_clear=has_media))
 
-@router.message(ProfileSetup.waiting_for_bio)
+@router.message(ProfileSetup.waiting_for_bio, ~F.text.startswith("/"))
 async def capture_text(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService):
-    if message.text == _("btn_cancel", lang):
+    if message.text and message.text in _btn("btn_cancel"):
         from bot.handlers.base import fsm_cancel
         await fsm_cancel(message, state, lang, profile_service)
         return
-    if message.text == _("btn_clear", lang):
+    if message.text and message.text in _btn("btn_clear"):
         from bot.handlers.base import fsm_clear
         await fsm_clear(message, state, lang, profile_service)
         return
@@ -59,16 +59,17 @@ async def capture_text(message: types.Message, state: FSMContext, lang: str, pro
     await message.answer(_("bio_saved", lang), reply_markup=edit_info_menu_kb(lang))
     await state.clear()
 
-@router.message(ProfileSetup.waiting_for_media)
+@router.message(ProfileSetup.waiting_for_media, ~F.text.startswith("/"))
 async def capture_media(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService):
-    if message.text == _("btn_cancel", lang):
+    if message.text and message.text in _btn("btn_cancel"):
         from bot.handlers.base import fsm_cancel
         await fsm_cancel(message, state, lang, profile_service)
         return
-    if message.text == _("btn_clear", lang):
+    if message.text and message.text in _btn("btn_clear"):
         from bot.handlers.base import fsm_clear
         await fsm_clear(message, state, lang, profile_service)
         return
+        
     valid_types = ['photo', 'video', 'voice', 'animation', 'audio', 'document']
     if message.content_type not in valid_types:
         return await message.answer(_("invalid_media", lang))

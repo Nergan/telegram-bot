@@ -16,7 +16,11 @@ async def switch_language(
     message: types.Message, state: FSMContext, lang: str, 
     user_service: UserService, profile_service: ProfileService, contact_req_service: ContactRequestService, tag_service: TagService
 ):
-    new_lang = message.text.split("_")[1]
+    cmd = message.text.split()[0]
+    if "@" in cmd: 
+        cmd = cmd.split("@")[0]
+        
+    new_lang = cmd.split("_")[1]
     await user_service.set_lang(message.from_user.id, new_lang)
     await message.answer(f"✅ Language updated to: {new_lang.upper()}")
     await show_main_menu(message, state, new_lang, profile_service, contact_req_service, tag_service)
@@ -56,15 +60,15 @@ async def fsm_cancel(message: types.Message, state: FSMContext, lang: str, profi
 async def fsm_clear(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService):
     curr_state = await state.get_state()
     field_map = {
-        ProfileSetup.waiting_for_bio: "text",
-        ProfileSetup.waiting_for_contact_val: "contacts",
-        ProfileSetup.waiting_for_media: "media"
+        ProfileSetup.waiting_for_bio.state: "text",
+        ProfileSetup.waiting_for_media.state: "media"
     }
+    
     field = field_map.get(curr_state)
     if field:
         active_prof = await profile_service.get_active_profile(message.from_user.id)
         if active_prof:
-            val = [] if field in ["media", "contacts"] else None
+            val = [] if field == "media" else None
             await profile_service.update_profile(active_prof['public_uuid'], {field: val})
             logger.info(f"User {message.from_user.id} cleared {field}.")
             

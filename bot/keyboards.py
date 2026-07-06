@@ -94,7 +94,7 @@ def manage_contacts_inline_kb(lang: str, contacts: list) -> InlineKeyboardMarkup
     for c in contacts:
         cid = c["id"]
         val_truncated = c["value"][:12] + "..." if len(c["value"]) > 15 else c["value"]
-        vis_text = "🌐" if not c.get("is_public") else "🔒"
+        vis_text = "🌐" if c.get("is_public") else "🔒"
         row = [InlineKeyboardButton(text=f"{vis_text} ({val_truncated})", callback_data=f"togglecon_{cid}")]
         if cid != "tg_username":
             row.append(InlineKeyboardButton(text="🗑️", callback_data=f"delcon_{cid}"))
@@ -109,7 +109,7 @@ def contact_share_selection_kb(lang: str, private_contacts: list, selected_ids: 
         prefix = "✅ " if cid in selected_ids else "⬜ "
         val_truncated = c["value"][:18] + "..." if len(c["value"]) > 21 else c["value"]
         keyboard.append([InlineKeyboardButton(text=f"{prefix}{val_truncated}", callback_data=f"selcon_{cid}")])
-    btn_text = "📤 Confirm"
+    btn_text = _("btn_confirm_share", lang)
     keyboard.append([InlineKeyboardButton(text=btn_text, callback_data="confirm_share_contacts")])
     keyboard.append([InlineKeyboardButton(text=_("btn_cancel", lang), callback_data="cancel_share_contacts")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

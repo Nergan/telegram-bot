@@ -7,4 +7,4 @@ class ContactRequest(StatesGroup):
 class ProfileSetup(StatesGroup):
     waiting_for_bio = State()
     waiting_for_media = State()
-    waiting_for_contact_val = State() # Удалено состояние waiting_for_delete_all
+    waiting_for_contact_val = State()

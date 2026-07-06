@@ -21,9 +21,13 @@ async def verify_contact(val: str, lang: str) -> tuple[bool, str]:
         try:
             import phonenumbers
             parsed = phonenumbers.parse(val if val.startswith('+') else '+' + val, None)
-            if phonenumbers.is_valid_number(parsed): return True, phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
-            else: return False, _("con_add_instr", lang)
-        except Exception: return True, val
+            if phonenumbers.is_valid_number(parsed): 
+                return True, phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
+            else: 
+                return False, _("con_add_instr", lang)
+        except Exception: 
+            pass
+            
     url_pattern = re.compile(r'^(https?://)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(/[^\s]*)?$')
     if url_pattern.match(val):
         test_url = val if val.startswith('http') else 'https://' + val
@@ -72,9 +76,9 @@ async def add_contact_fsm_start(callback: types.CallbackQuery, state: FSMContext
     await callback.message.answer(_("con_add_instr", lang), reply_markup=cancel_fsm_kb(lang))
     await callback.answer()
 
-@router.message(ProfileSetup.waiting_for_contact_val)
+@router.message(ProfileSetup.waiting_for_contact_val, ~F.text.startswith("/"))
 async def capture_new_contact(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService):
-    if message.text == _("btn_cancel", lang):
+    if message.text and message.text in _btn("btn_cancel"):
         from bot.handlers.base import fsm_cancel
         await fsm_cancel(message, state, lang, profile_service)
         return
@@ -165,4 +169,4 @@ async def delete_contact(callback: types.CallbackQuery, lang: str, profile_servi
     else:
         text += _("con_none", lang)
         
-    await callback.message.edit_text(text, reply_markup=manage_contacts_inline_kb(lang, contacts))  
+    await callback.message.edit_text(text, reply_markup=manage_contacts_inline_kb(lang, contacts))

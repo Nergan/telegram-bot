@@ -64,6 +64,7 @@ async def get_profile_data(
     
     p = await profile_service.get_profile_by_uuid(payload.profile_id)
     if not p: raise HTTPException(status_code=404)
+    if p.get("user_id") != user_data['id']: raise HTTPException(status_code=403, detail="Access denied")
     
     active_tags_data = await tag_service.get_tags_by_ids(p.get("tags", []))
     active_tags = [{"id": t["_id"], "display": t["display"]} for t in active_tags_data]
@@ -107,6 +108,10 @@ async def update_tags(
     
     user_id = user_data['id']
     if await user_service.is_banned(user_id): raise HTTPException(status_code=403, detail="Banned")
+    
+    p = await profile_service.get_profile_by_uuid(payload.profile_id)
+    if not p or p.get("user_id") != user_id: 
+        raise HTTPException(status_code=403, detail="Access denied")
     
     lang = await user_service.get_lang(user_id)
     
@@ -220,6 +225,9 @@ async def handle_request_endpoint(
             private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
             shared_values = [c["value"] for c in private_contacts if c["id"] in payload.selected_contact_ids]
             
+            if not shared_values:
+                raise HTTPException(status_code=400, detail="Invalid contact IDs selected.")
+            
             await contact_req_service.update_status(payload.req_id, "accepted", {"target_shared_contacts": shared_values})
             
             b_profile = await profile_service.get_active_profile(user_id)
@@ -239,6 +247,8 @@ async def handle_request_endpoint(
             return {"status": "ok"}
             
         raise HTTPException(status_code=400, detail="Invalid action")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Error occurred in handle_request_endpoint")
         raise HTTPException(status_code=500, detail=str(e))
@@ -260,6 +270,9 @@ async def send_profile_to_chat_endpoint(
         
         req = await contact_req_service.get_request(payload.req_id)
         if not req: raise HTTPException(status_code=404, detail="Request not found")
+        
+        if user_id not in (req['initiator_id'], req['target_id']):
+            raise HTTPException(status_code=403, detail="Access denied")
         
         target_user_id = req['target_id'] if req['initiator_id'] == user_id else req['initiator_id']
         profile_to_send = await profile_service.get_active_profile(target_user_id)

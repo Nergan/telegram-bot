@@ -15,7 +15,6 @@ class Database:
     log_queue = None
     log_task = None
     
-    # In-memory fast cache to prevent spamming MongoDB reads for banned users
     _ban_cache = {}
     _ban_cache_time = {}
 
@@ -24,9 +23,7 @@ class Database:
         cls.client = AsyncIOMotorClient(MONGODB_URI, tls=True, tlsAllowInvalidCertificates=True)
         cls.db = cls.client["day_dating_bot"]
         cls.log_queue = asyncio.Queue()
-        # Build index for the O(log N) randomizer
         await cls.db.profiles.create_index([("random_index", 1)])
-        # Index for fast ban lookup
         await cls.db.users.create_index([("user_id", 1)], unique=True)
         logger.info("Connected to MongoDB and verified indexes.")
 
@@ -38,14 +35,12 @@ class Database:
 
     @classmethod
     async def migrate_random_indexes(cls):
-        """Populate missing indexes on restart for pre-existing users."""
         docs = await cls.db.profiles.find({"random_index": {"$exists": False}}).to_list(None)
         for d in docs:
             await cls.db.profiles.update_one({"_id": d["_id"]}, {"$set": {"random_index": random.random()}})
 
     @classmethod
     async def log_worker(cls):
-        """Background worker that flushes the queue to the database in batches."""
         while True:
             try:
                 batch = []
@@ -58,18 +53,24 @@ class Database:
                     batch.append(cls.log_queue.get_nowait())
                         
                 if batch:
-                    await cls.db.logs.insert_many(batch)
+                    try:
+                        await cls.db.logs.insert_many(batch)
+                    except Exception:
+                        pass
                     
                 for _ in batch:
                     cls.log_queue.task_done()
                     
-                await asyncio.sleep(2) # Max write frequency
+                await asyncio.sleep(2)
             except asyncio.CancelledError:
                 batch = []
                 while not cls.log_queue.empty():
                     batch.append(cls.log_queue.get_nowait())
                 if batch:
-                    await cls.db.logs.insert_many(batch)
+                    try:
+                        await cls.db.logs.insert_many(batch)
+                    except Exception:
+                        pass
                 break
             except Exception as e:
                 logger.error(f"Log worker error: {e}")
@@ -77,7 +78,6 @@ class Database:
 
     @classmethod
     def log_action_queued(cls, user_id: int, action_type: str, data: dict):
-        """Pushes compact logs into memory queue."""
         if cls.log_queue:
             cls.log_queue.put_nowait({
                 "ts": datetime.datetime.now(datetime.timezone.utc),
@@ -97,7 +97,6 @@ class Database:
 
     @classmethod
     async def is_user_banned(cls, user_id: int) -> bool:
-        """Check if user is banned using DB + 60s memory cache for extreme speed & safety."""
         now = time.time()
         if user_id in cls._ban_cache and now - cls._ban_cache_time.get(user_id, 0) < 60:
             return cls._ban_cache[user_id]
@@ -111,7 +110,6 @@ class Database:
 
     @classmethod
     async def set_user_banned(cls, user_id: int, banned: bool):
-        """Helper to modify ban statuses manually programmatically if needed."""
         await cls.db.users.update_one({"user_id": user_id}, {"$set": {"is_banned": banned}}, upsert=True)
         cls._ban_cache[user_id] = banned
         cls._ban_cache_time[user_id] = time.time()
@@ -125,11 +123,9 @@ class Database:
                 return await cls.db.profiles.find_one({"_id": active["_id"]})
             return active
         
-        # If they have literally 0 profiles, create one natively (for new users)
         if await cls.db.profiles.count_documents({"user_id": user_id}) == 0:
             return await cls.create_profile(user_id, username)
             
-        # Otherwise, they have profiles, but explicitly deactivated them. Return None.
         return None
     
     @classmethod
@@ -153,7 +149,7 @@ class Database:
             "text": None,
             "media": [], 
             "is_active": False,
-            "random_index": random.random(), # Required for fast, indexed querying
+            "random_index": random.random(),
             "created_at": datetime.datetime.now(datetime.timezone.utc)
         }
         if await cls.db.profiles.count_documents({"user_id": user_id}) == 0:
@@ -210,7 +206,6 @@ class Database:
         if await cls.db.profiles.count_documents({"user_id": user_id}) <= 1:
             return False 
         await cls.db.profiles.delete_one({"user_id": user_id, "public_uuid": public_uuid})
-        # We no longer auto-activate a random profile. Let them be inactive until they choose one.
         return True
 
     @classmethod
@@ -219,7 +214,6 @@ class Database:
         if active:
             await cls.db.profiles.delete_many({"user_id": user_id, "is_active": False})
         else:
-            # Prevent deleting *all* profiles if they run this command while having NO active profile. Keep the most recent one.
             last_profile = await cls.db.profiles.find_one({"user_id": user_id}, sort=[("created_at", -1)])
             if last_profile:
                 await cls.db.profiles.delete_many({"user_id": user_id, "_id": {"$ne": last_profile["_id"]}})
@@ -272,24 +266,19 @@ class Database:
     
     @classmethod
     async def get_tags_by_ids(cls, tag_ids: list) -> list:
-        """Fetches full tag documents by their IDs."""
         if not tag_ids: return []
         cursor = cls.db.tags.find({"_id": {"$in": tag_ids}})
         return await cursor.to_list(length=len(tag_ids))
 
     @classmethod
     async def search_tags(cls, query: str, limit: int = 50) -> list:
-        """Smart, highly optimized search utilizing MongoDB indexing."""
         if not query:
-            # Exclude 'geo', 'age', and 'language'. Return ALL other tags (no limit).
             cursor = cls.db.tags.find(
                 {"category": {"$nin": ["geo", "age", "language"]}}
             )
             return await cursor.to_list(length=None)
         
         q_lower = query.lower().strip()
-        # Fast prefix matching on the flattened search_terms array
         cursor = cls.db.tags.find({"search_terms": {"$regex": f"^{q_lower}"}})
-        # Sort by weight (Countries 100 > Cities 50), then reverse alphabetical (Z to A)
         cursor = cursor.sort([("weight", -1), ("display.en", -1)]).limit(limit)
         return await cursor.to_list(length=limit)

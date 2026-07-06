@@ -19,6 +19,7 @@ TRANSLATIONS = {
         "btn_tags": "🏷️ Tags",
         "btn_filters": "🎛️ Filters",
         "btn_requests": "📥 Requests (S: {} | R: {})",
+        "btn_confirm_share": "📤 Confirm",
         
         "menu_active": "🏠 View Active Profile 🏠",
         "menu_edit": "What would you like to edit?",
@@ -126,7 +127,7 @@ TRANSLATIONS = {
         "btn_clear": "🗑️ Очистить",
         "btn_next": "⏩ Следующая",
         "btn_set_active": "🌟 Сделать активной",
-        "btn_regen_id": "🔄 Обновить ID",
+        "btn_regen_id": "🔄 ID обновлен!",
         "btn_delete": "🗑️ Удалить",
         "btn_view_again": "👥 Вернуться к анкетам",
         "btn_create": "➕ Создать анкету",
@@ -134,6 +135,7 @@ TRANSLATIONS = {
         "btn_tags": "🏷️ Теги",
         "btn_filters": "🎛️ Фильтры",
         "btn_requests": "📥 Запросы (Отпр: {} | Получ: {})",
+        "btn_confirm_share": "📤 Подтвердить",
         
         "menu_active": "🏠 Ваша активная анкета 🏠",
         "menu_edit": "Что вы хотите изменить?",
@@ -194,7 +196,7 @@ TRANSLATIONS = {
         "lbl_pub_con": "🌐 <b>Публичные контакты:</b>\n",
         "lbl_tags": "🏷️ <b>Теги: </b>{}\n",
         "lbl_options": "⚙️ Опции:",
-        "lbl_err_media": "⚠️ <i>Некоторые медиа-файлы не загрузились.</i>\n\n{}",
+        "lbl_err_media": "⚠️ <i>Не некоторые медиа-файлы не загрузились.</i>\n\n{}",
         "lbl_exchanged": "👤 <b>Анкета по обмену:</b>\n\n",
         
         "con_manage": "📞 <b>Управление контактами</b>\n\n",
@@ -245,6 +247,7 @@ TRANSLATIONS = {
         "btn_tags": "🏷️ Tags",
         "btn_filters": "🎛️ Filtros",
         "btn_requests": "📥 Solicitações (Env: {} | Rec: {})",
+        "btn_confirm_share": "📤 Confirmar",
         
         "menu_active": "🏠 Ver Perfil Ativo 🏠",
         "menu_edit": "O que você gostaria de editar?",
@@ -292,7 +295,7 @@ TRANSLATIONS = {
         "cancel_share": "❌ Compartilhamento cancelado.",
         
         "notif_send": "🔔 <b>UM USUÁRIO COMPARTILHOU O PERFIL DELE COM VOCÊ!</b>\n",
-        "notif_msg": "💬 <b>Mensagem:</b> {}\n\n",
+        "notif_msg": "💬 <b>Message:</b> {}\n\n",
         "notif_send_priv": "🤝 <b>Eles também compartilharam contatos privados com você!</b>\n",
         "notif_send_footer": "Abra '📥 Solicitações' no seu perfil ativo para ver os detalhes.\n\n",
         "notif_mut": "🔔 <b>NOVA SOLICITAÇÃO DE TROCA DE CONTATO!</b>\n",

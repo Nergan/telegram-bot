@@ -31,9 +31,11 @@ async def send_profile(chat_id: int, profile: dict, kb, lang: str, tag_service: 
         for tid in profile['tags']:
             tag_def = next((t for t in tag_docs if t['_id'] == tid), None)
             if tag_def:
-                translated_tags.append(tag_def['display'].get(lang, tag_def['display']['en']))
+                display = tag_def.get('display', {})
+                # Safely fallback to raw ID if the locale is inexplicably missing
+                translated_tags.append(display.get(lang, display.get('en', str(tid))))
             else:
-                translated_tags.append(tid)
+                translated_tags.append(str(tid))
         
         if translated_tags:
             text += _("lbl_tags", lang, ' • '.join(translated_tags))

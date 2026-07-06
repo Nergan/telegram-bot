@@ -125,7 +125,7 @@ class BrowseService:
 
     async def get_next_profile(self, user_id: int, active_profile: dict) -> Tuple[Optional[Dict[str, Any]], bool]:
         seen_uuids = await self.user_repo.get_seen_profiles(user_id)
-        filters = active_profile.get("filters", {})
+        filters = active_profile.get("filters") or {}
         
         and_clauses = [{"user_id": {"$ne": user_id}}, {"is_active": True}]
         if filters.get("require_tags"): and_clauses.append({"tags": {"$all": filters["require_tags"]}})

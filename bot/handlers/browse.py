@@ -253,7 +253,7 @@ async def cancel_share_contacts_cb(callback: types.CallbackQuery, state: FSMCont
 async def skip_contact_msg(callback: types.CallbackQuery, state: FSMContext, lang: str, profile_service: ProfileService):
     await show_contact_selection(callback, state, lang, profile_service)
 
-@router.message(ContactRequest.waiting_for_message)
+@router.message(ContactRequest.waiting_for_message, ~F.text.startswith("/"))
 async def capture_contact_msg(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService):
     if message.content_type != 'text': return await message.answer(_("invalid_text", lang))
     await state.update_data(message_text=message.text)
@@ -281,6 +281,9 @@ async def contact_decisions(
         
     elif decision == "accept":
         active_prof = await profile_service.get_active_profile(callback.from_user.id)
+        if not active_prof:
+            return await callback.answer(_("menu_no_active", lang), show_alert=True)
+            
         private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
         if not private_contacts:
             return await callback.answer(_("con_add_instr", lang), show_alert=True)
