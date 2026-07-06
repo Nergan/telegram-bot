@@ -2,8 +2,6 @@ import uuid
 import html
 import logging
 import re
-import urllib.parse
-import aiohttp
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from bot.states import ProfileSetup
@@ -16,35 +14,31 @@ logger = logging.getLogger(__name__)
 
 async def verify_contact(val: str, lang: str) -> tuple[bool, str]:
     val = val.strip()
-    if re.match(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', val): return True, val
+    
+    # 1. Email check
+    if re.match(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', val): 
+        return True, val
+        
+    # 2. Phone check
     if re.match(r'^\+?[0-9\s\-\(\)]{7,20}$', val) and any(c.isdigit() for c in val):
         try:
             import phonenumbers
             parsed = phonenumbers.parse(val if val.startswith('+') else '+' + val, None)
             if phonenumbers.is_valid_number(parsed): 
                 return True, phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
-            else: 
-                return False, _("con_add_instr", lang)
         except Exception: 
             pass
             
+    # 3. URL check (fully offline validation to eliminate SSRF vulnerability and false-negatives)
     url_pattern = re.compile(r'^(https?://)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(/[^\s]*)?$')
     if url_pattern.match(val):
         test_url = val if val.startswith('http') else 'https://' + val
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(test_url, timeout=5, allow_redirects=True) as resp:
-                    if resp.status != 404: return True, test_url
-                    else: return False, "❌ 404 URL."
-        except Exception: return False, "❌ URL Error."
-    try:
-        async with aiohttp.ClientSession() as session:
-            url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(val)}&format=json&limit=1"
-            async with session.get(url, headers={"User-Agent": "DayDatingBot/1.0"}, timeout=5) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data and len(data) > 0: return True, data[0].get("display_name", val)
-    except Exception: pass
+        return True, test_url
+
+    # 4. Location / Social Alphanumeric Handle fallback (Unicode support matching to prevent blocks)
+    if re.match(r'^[-\w\s,\.\'\(\)\@+]{3,60}$', val, re.UNICODE):
+        return True, val
+
     return False, _("con_add_instr", lang)
 
 @router.message(F.text.in_(_btn("btn_contacts")))

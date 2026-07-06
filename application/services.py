@@ -164,14 +164,17 @@ class ContactRequestService:
         self.req_repo = req_repo
 
     async def get_pending_actions(self, initiator_id: int, target_id: int) -> List[str]:
-        return await self.req_repo.get_pending_actions(initiator_id, target_id)
+        outbound = await self.req_repo.get_pending_actions(initiator_id, target_id)
+        inbound = await self.req_repo.get_pending_actions(target_id, initiator_id)
+        return list(set(outbound + inbound))
 
     async def get_requests_counts(self, user_id: int) -> Tuple[int, int]:
         return (await self.req_repo.count_pending_by_initiator(user_id), await self.req_repo.count_pending_by_target(user_id))
 
     async def has_pending_request(self, initiator_id: int, target_id: int, action: str) -> bool:
-        req = await self.req_repo.get_pending_by_initiator_target_action(initiator_id, target_id, action)
-        return req is not None
+        req_out = await self.req_repo.get_pending_by_initiator_target_action(initiator_id, target_id, action)
+        req_in = await self.req_repo.get_pending_by_initiator_target_action(target_id, initiator_id, action)
+        return req_out is not None or req_in is not None
 
     async def create_request(self, initiator_id: int, target_id: int, action: str, message: str, shared_contacts: list) -> str:
         req_id = uuid.uuid4().hex

@@ -40,6 +40,7 @@ tag_service = TagService(tag_repo)
 # Initialize Aiogram Dispatcher with Dependency Injection
 dp = Dispatcher(
     storage=MongoFSMStorage(mongo_db),
+    mongo_db=mongo_db,
     user_service=user_service,
     profile_service=profile_service,
     browse_service=browse_service,

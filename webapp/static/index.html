@@ -539,6 +539,11 @@
             if (selectedBoxes.length === 0 && Array.isArray(myPrivateContacts) && myPrivateContacts.length > 0) {
                 showCustomAlert(_i('al_sel')); return;
             }
+            const confirmBtn = document.getElementById('modal-confirm-btn');
+            if (confirmBtn) {
+                confirmBtn.disabled = true;
+                confirmBtn.style.opacity = '0.5';
+            }
             try {
                 let res = await fetch('/api/handle_request', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -550,6 +555,12 @@
                     showCustomAlert(err.detail || _i('err'));
                 }
             } catch (e) { showCustomAlert(_i('err')); }
+            finally {
+                if (confirmBtn) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.style.opacity = '1';
+                }
+            }
         }
 
         async function handleActionNoModal(action, reqId) {

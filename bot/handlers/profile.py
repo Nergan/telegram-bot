@@ -1,6 +1,8 @@
 import uuid
 import logging
 import asyncio
+import datetime
+from collections import deque
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -13,7 +15,8 @@ from application.services import ProfileService, ContactRequestService, TagServi
 router = Router()
 logger = logging.getLogger(__name__)
 
-ALBUM_BUFFER = {}
+ALBUM_BUFFER_MEM = {}
+PROCESSED_ALBUMS_MEM = deque(maxlen=100)
 
 @router.message(F.text.in_(_btn("btn_edit_active")))
 async def edit_info_menu(message: types.Message, lang: str, profile_service: ProfileService):
@@ -60,7 +63,7 @@ async def capture_text(message: types.Message, state: FSMContext, lang: str, pro
     await state.clear()
 
 @router.message(ProfileSetup.waiting_for_media, ~F.text.startswith("/"))
-async def capture_media(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService):
+async def capture_media(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService, mongo_db=None):
     if message.text and message.text in _btn("btn_cancel"):
         from bot.handlers.base import fsm_cancel
         await fsm_cancel(message, state, lang, profile_service)
@@ -86,21 +89,55 @@ async def capture_media(message: types.Message, state: FSMContext, lang: str, pr
     elif message.document: media_doc['file_id'] = message.document.file_id
     
     if message.media_group_id:
-        if message.media_group_id not in ALBUM_BUFFER:
-            ALBUM_BUFFER[message.media_group_id] = [media_doc]
-            try:
-                await message.answer(_("album_proc", lang))
-                await asyncio.sleep(1.5)
-                buffered_docs = ALBUM_BUFFER.pop(message.media_group_id, [])
-                if buffered_docs:
-                    await profile_service.update_profile(active_prof['public_uuid'], {"media": buffered_docs})
-                    await state.clear()
-                    await message.answer(_("album_saved", lang), reply_markup=edit_info_menu_kb(lang))
-            except Exception as e:
-                ALBUM_BUFFER.pop(message.media_group_id, None)
-                logger.error(f"Album processing error: {e}")
+        if mongo_db:
+            processed = await mongo_db.db.processed_albums.find_one({"media_group_id": message.media_group_id})
+            if processed:
+                return
+                
+            res = await mongo_db.db.album_buffers.find_one_and_update(
+                {"media_group_id": message.media_group_id},
+                {"$push": {"media": media_doc}},
+                upsert=True,
+                return_document=True
+            )
+            
+            if len(res.get("media", [])) == 1:
+                try:
+                    await message.answer(_("album_proc", lang))
+                    await asyncio.sleep(1.5)
+                    final_doc = await mongo_db.db.album_buffers.find_one_and_delete({"media_group_id": message.media_group_id})
+                    if final_doc and final_doc.get("media"):
+                        await profile_service.update_profile(active_prof['public_uuid'], {"media": final_doc["media"]})
+                        await mongo_db.db.processed_albums.insert_one({
+                            "media_group_id": message.media_group_id,
+                            "created_at": datetime.datetime.now(datetime.timezone.utc)
+                        })
+                        await state.clear()
+                        await message.answer(_("album_saved", lang), reply_markup=edit_info_menu_kb(lang))
+                except Exception as e:
+                    await mongo_db.db.album_buffers.delete_one({"media_group_id": message.media_group_id})
+                    logger.error(f"Distributed album processing error: {e}")
         else:
-            ALBUM_BUFFER[message.media_group_id].append(media_doc)
+            global ALBUM_BUFFER_MEM, PROCESSED_ALBUMS_MEM
+            if message.media_group_id in PROCESSED_ALBUMS_MEM:
+                return
+                
+            if message.media_group_id not in ALBUM_BUFFER_MEM:
+                ALBUM_BUFFER_MEM[message.media_group_id] = [media_doc]
+                try:
+                    await message.answer(_("album_proc", lang))
+                    await asyncio.sleep(1.5)
+                    buffered_docs = ALBUM_BUFFER_MEM.pop(message.media_group_id, [])
+                    if buffered_docs:
+                        await profile_service.update_profile(active_prof['public_uuid'], {"media": buffered_docs})
+                        PROCESSED_ALBUMS_MEM.append(message.media_group_id)
+                        await state.clear()
+                        await message.answer(_("album_saved", lang), reply_markup=edit_info_menu_kb(lang))
+                except Exception as e:
+                    ALBUM_BUFFER_MEM.pop(message.media_group_id, None)
+                    logger.error(f"Album processing error: {e}")
+            else:
+                ALBUM_BUFFER_MEM[message.media_group_id].append(media_doc)
     else:
         await profile_service.update_profile(active_prof['public_uuid'], {"media": [media_doc]})
         await message.answer(_("media_saved", lang), reply_markup=edit_info_menu_kb(lang))
@@ -150,7 +187,10 @@ async def manage_prof_cb(
         return await callback.answer(_("prof_not_found", lang), show_alert=True)
     
     await state.update_data(managing_uuid=prof_uuid)
-    await callback.message.delete()
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
     
     is_active = profile.get('is_active', False)
     await callback.message.answer(_("prof_managing", lang), reply_markup=manage_action_kb(lang, is_active))

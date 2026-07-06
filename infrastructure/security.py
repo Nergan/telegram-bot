@@ -1,6 +1,7 @@
 import hmac
 import hashlib
 import json
+import time
 from urllib.parse import parse_qsl
 from infrastructure.config import TOKEN
 
@@ -14,6 +15,15 @@ def validate_webapp_data(init_data: str) -> dict | None:
             return None
             
         hash_val = parsed_data.pop('hash')
+        
+        # Expired authentication checks (drop payload immediately if older than 24 hours)
+        auth_date_str = parsed_data.get('auth_date')
+        if auth_date_str:
+            if time.time() - float(auth_date_str) > 86400:
+                return None
+        else:
+            return None
+            
         data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
         secret_key = hmac.new(b"WebAppData", TOKEN.encode(), hashlib.sha256).digest()
         calc_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()

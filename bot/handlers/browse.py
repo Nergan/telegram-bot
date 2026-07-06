@@ -100,7 +100,8 @@ async def init_contact_inline(
     
     if has_msg:
         await state.set_state(ContactRequest.waiting_for_message)
-        await callback.message.answer(_("attach_msg", lang), reply_markup=skip_message_kb(lang))
+        prompt_msg = await callback.message.answer(_("attach_msg", lang), reply_markup=skip_message_kb(lang))
+        await state.update_data(prompt_message_id=prompt_msg.message_id)
         await callback.answer()
     else:
         await show_contact_selection(callback, state, lang, profile_service)
@@ -108,6 +109,16 @@ async def init_contact_inline(
 async def show_contact_selection(event: types.CallbackQuery | types.Message, state: FSMContext, lang: str, profile_service: ProfileService):
     user_id = event.from_user.id
     active_prof = await profile_service.get_active_profile(user_id)
+    if not active_prof:
+        await state.clear()
+        msg_err = _("menu_no_active", lang)
+        if isinstance(event, types.CallbackQuery):
+            await event.message.answer(msg_err)
+            await event.answer()
+        else:
+            await event.answer(msg_err)
+        return
+
     await profile_service.sync_telegram_username(active_prof, event.from_user.username)
     active_prof = await profile_service.get_active_profile(user_id)
     
@@ -121,6 +132,7 @@ async def show_contact_selection(event: types.CallbackQuery | types.Message, sta
         msg_err = _("err_no_priv", lang)
         if isinstance(event, types.CallbackQuery):
             await event.message.answer(msg_err)
+            await event.answer()
         else:
             await event.answer(msg_err)
         return
@@ -147,8 +159,13 @@ async def toggle_share_selection(callback: types.CallbackQuery, state: FSMContex
     action = data.get("action")
     selected_ids = data.get("selected_contact_ids", [])
     
+    active_prof = await profile_service.get_active_profile(callback.from_user.id)
+    if not active_prof:
+        await state.clear()
+        return await callback.answer(_("menu_no_active", lang), show_alert=True)
+        
     if cid in selected_ids:
-        if action == "req" and len(selected_ids) <= 1:
+        if action in ("req", "accept") and len(selected_ids) <= 1:
             return await callback.answer(_("err_mut_min", lang), show_alert=True)
         selected_ids.remove(cid)
     else:
@@ -156,7 +173,6 @@ async def toggle_share_selection(callback: types.CallbackQuery, state: FSMContex
         
     await state.update_data(selected_contact_ids=selected_ids)
     
-    active_prof = await profile_service.get_active_profile(callback.from_user.id)
     private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
     await callback.message.edit_reply_markup(
         reply_markup=contact_share_selection_kb(lang, private_contacts, selected_ids, action)
@@ -174,6 +190,10 @@ async def confirm_share_contacts_cb(
     
     selected_ids = data.get("selected_contact_ids", [])
     active_prof = await profile_service.get_active_profile(callback.from_user.id)
+    if not active_prof:
+        await state.clear()
+        return await callback.answer(_("menu_no_active", lang), show_alert=True)
+        
     shared_contacts = [c["value"] for c in active_prof.get("contacts", []) if c["id"] in selected_ids]
     
     if action == "req" and not shared_contacts:
@@ -188,22 +208,34 @@ async def confirm_share_contacts_cb(
             await state.clear()
             return await callback.answer(_("req_expired", lang), show_alert=True)
             
+        initiator_prof = await profile_service.get_active_profile(req['initiator_id'])
+        if not initiator_prof:
+            await state.clear()
+            return await callback.answer(_("prof_not_found", lang), show_alert=True)
+            
         await contact_req_service.update_status(accepting_req_id, "accepted", {"target_shared_contacts": shared_contacts})
         
         init_lang = await user_service.get_lang(req['initiator_id'])
-        await send_profile(req['initiator_id'], active_prof, kb=None, lang=init_lang, tag_service=tag_service, custom_prefix=_("lbl_exchanged", init_lang))
-        
-        contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
-        await bot.send_message(req['initiator_id'], _("mut_accepted", init_lang, contacts_text))
-        
+        try:
+            await send_profile(req['initiator_id'], active_prof, kb=None, lang=init_lang, tag_service=tag_service, custom_prefix=_("lbl_exchanged", init_lang))
+            contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
+            await bot.send_message(req['initiator_id'], _("mut_accepted", init_lang, contacts_text))
+        except Exception as e:
+            logger.warning(f"Could not notify request initiator {req['initiator_id']}: {e}")
+            
         initiator_shared = req.get("shared_contacts", [])
         if initiator_shared:
-            a_profile = await profile_service.get_active_profile(req['initiator_id'])
-            await send_profile(callback.from_user.id, a_profile, kb=None, lang=lang, tag_service=tag_service, custom_prefix=_("lbl_exchanged", lang))
-            init_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in initiator_shared)
-            await callback.message.answer(_("mut_complete", lang, init_contacts_text))
+            try:
+                await send_profile(callback.from_user.id, initiator_prof, kb=None, lang=lang, tag_service=tag_service, custom_prefix=_("lbl_exchanged", lang))
+                init_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in initiator_shared)
+                await callback.message.answer(_("mut_complete", lang, init_contacts_text))
+            except Exception as e:
+                logger.warning(f"Could not deliver completed mutual exchange to acceptor {callback.from_user.id}: {e}")
             
-        await callback.message.delete()
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
         await state.clear()
         
     else:
@@ -212,14 +244,30 @@ async def confirm_share_contacts_cb(
         
         target_prof = await profile_service.get_profile_by_uuid(target_uuid)
         if not target_prof:
-            success = False
-        elif await contact_req_service.has_pending_request(callback.from_user.id, target_prof['user_id'], action):
-            success = False
-        else:
-            msg_text = data.get("message_text")
-            req_id = await contact_req_service.create_request(callback.from_user.id, target_prof['user_id'], action, msg_text, shared_contacts)
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.message.answer(_("prof_not_found", lang), reply_markup=browse_kb(lang))
+            await state.clear()
+            return
             
-            target_lang = await user_service.get_lang(target_prof['user_id'])
+        if await contact_req_service.has_pending_request(callback.from_user.id, target_prof['user_id'], action):
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            req_type_str = _("str_oneway", lang) if action == "send" else _("str_mutual", lang)
+            await callback.message.answer(_("alert_already_req", lang, req_type_str), reply_markup=browse_kb(lang))
+            await state.clear()
+            return
+            
+        msg_text = data.get("message_text")
+        req_id = await contact_req_service.create_request(callback.from_user.id, target_prof['user_id'], action, msg_text, shared_contacts)
+        
+        target_lang = await user_service.get_lang(target_prof['user_id'])
+        success = False
+        try:
             if action == "send":
                 prefix = _("notif_send", target_lang)
                 if msg_text: prefix += _("notif_msg", target_lang, html.escape(msg_text))
@@ -232,31 +280,52 @@ async def confirm_share_contacts_cb(
                 prefix += _("notif_mut_footer", target_lang)
                 await send_profile(target_prof['user_id'], active_prof, contact_decision_kb(target_lang, req_id), target_lang, tag_service, custom_prefix=prefix)
             success = True
+        except Exception as e:
+            logger.warning(f"Failed to transmit request notification to recipient user {target_prof['user_id']}: {e}")
+            success = True
         
-        await callback.message.delete()
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
         if success:
             msg = _("req_sent_send", lang, target_uuid) if action == "send" else _("req_sent_mut", lang, target_uuid)
             await callback.message.answer(msg, reply_markup=browse_kb(lang))
         else:
-            req_type_str = _("str_oneway", lang) if action == "send" else _("str_mutual", lang)
-            await callback.message.answer(_("alert_already_req", lang, req_type_str), reply_markup=browse_kb(lang))
+            await callback.message.answer(_("err_render", lang, "Failed to deliver request notification."), reply_markup=browse_kb(lang))
         await state.clear()
 
 @router.callback_query(F.data == "cancel_share_contacts", ContactRequest.selecting_contacts)
 async def cancel_share_contacts_cb(callback: types.CallbackQuery, state: FSMContext, lang: str):
     await state.clear()
-    await callback.message.delete()
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
     await callback.message.answer(_("cancel_share", lang), reply_markup=browse_kb(lang))
     await callback.answer()
 
 @router.callback_query(F.data == "skip_req_msg", ContactRequest.waiting_for_message)
 async def skip_contact_msg(callback: types.CallbackQuery, state: FSMContext, lang: str, profile_service: ProfileService):
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
     await show_contact_selection(callback, state, lang, profile_service)
 
 @router.message(ContactRequest.waiting_for_message, ~F.text.startswith("/"))
 async def capture_contact_msg(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService):
     if message.content_type != 'text': return await message.answer(_("invalid_text", lang))
     await state.update_data(message_text=message.text)
+    
+    data = await state.get_data()
+    prompt_msg_id = data.get("prompt_message_id")
+    if prompt_msg_id:
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=prompt_msg_id)
+        except Exception:
+            pass
+            
     await show_contact_selection(message, state, lang, profile_service)
 
 @router.callback_query(F.data.startswith("accept_") | F.data.startswith("decline_"))
@@ -287,6 +356,8 @@ async def contact_decisions(
         private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
         if not private_contacts:
             return await callback.answer(_("con_add_instr", lang), show_alert=True)
+            
+        await callback.message.edit_reply_markup(reply_markup=None)
             
         await state.update_data(
             accepting_req_id=req_id, action="accept",

@@ -1,9 +1,13 @@
+import re
 import time
 import asyncio
 import datetime
+import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from typing import List, Dict, Any, Optional, Tuple
 from domain.interfaces import IUserRepository, IProfileRepository, IContactRequestRepository, ITagRepository
+
+logger = logging.getLogger(__name__)
 
 class MongoDatabase:
     def __init__(self, uri: str):
@@ -15,15 +19,23 @@ class MongoDatabase:
 
     async def setup_indexes(self):
         await self.db.profiles.create_index([("random_index", 1)])
+        await self.db.profiles.create_index([("public_uuid", 1)], unique=True)
         await self.db.users.create_index([("user_id", 1)], unique=True)
+        await self.db.user_settings.create_index([("user_id", 1)], unique=True)
+        await self.db.search_sessions.create_index([("user_id", 1)], unique=True)
+        await self.db.contact_requests.create_index([("req_id", 1)], unique=True)
+        await self.db.contact_requests.create_index([("initiator_id", 1)])
+        await self.db.contact_requests.create_index([("target_id", 1)])
+        await self.db.contact_requests.create_index([("initiator_id", 1), ("target_id", 1), ("status", 1)])
+        await self.db.processed_albums.create_index("created_at", expireAfterSeconds=86400)
 
     def close(self):
         self.client.close()
 
     async def log_worker(self):
         while True:
+            batch = []
             try:
-                batch = []
                 item = await self.log_queue.get()
                 batch.append(item)
                 
@@ -31,16 +43,27 @@ class MongoDatabase:
                     if self.log_queue.empty(): break
                     batch.append(self.log_queue.get_nowait())
                         
-                if batch: await self.db.logs.insert_many(batch)
-                for _ in batch: self.log_queue.task_done()
+                if batch: 
+                    await self.db.logs.insert_many(batch)
+                for _ in batch: 
+                    self.log_queue.task_done()
+                batch = []
                 await asyncio.sleep(2)
             except asyncio.CancelledError:
-                batch = []
-                while not self.log_queue.empty(): batch.append(self.log_queue.get_nowait())
-                if batch: await self.db.logs.insert_many(batch)
+                flush_batch = list(batch)
+                while not self.log_queue.empty(): 
+                    flush_batch.append(self.log_queue.get_nowait())
+                if flush_batch:
+                    try:
+                        await self.db.logs.insert_many(flush_batch)
+                    except Exception as e:
+                        logger.error(f"Failed to flush logs on shutdown: {e}")
                 break
-            except Exception:
-                await asyncio.sleep(2)
+            except Exception as e:
+                logger.error(f"Database logging write failed: {e}. Re-queueing logs.")
+                for failed_item in batch:
+                    self.log_queue.put_nowait(failed_item)
+                await asyncio.sleep(5)
 
 
 class MongoUserRepository(IUserRepository):
@@ -192,9 +215,10 @@ class MongoTagRepository(ITagRepository):
 
     async def search(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
         if not query:
-            return await self.db.tags.find({"category": {"$nin": ["geo", "age", "language"]}}).to_list(length=None)
+            return await self.db.tags.find({"category": {"$nin": ["geo", "age", "language"]}}).to_list(length=limit)
         
         q_lower = query.lower().strip()
-        cursor = self.db.tags.find({"search_terms": {"$regex": f"^{q_lower}"}})
+        escaped_q = re.escape(q_lower)
+        cursor = self.db.tags.find({"search_terms": {"$regex": f"^{escaped_q}"}})
         cursor = cursor.sort([("weight", -1), ("display.en", -1)]).limit(limit)
         return await cursor.to_list(length=limit)

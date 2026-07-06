@@ -32,10 +32,10 @@ async def send_profile(chat_id: int, profile: dict, kb, lang: str, tag_service: 
             tag_def = next((t for t in tag_docs if t['_id'] == tid), None)
             if tag_def:
                 display = tag_def.get('display', {})
-                # Safely fallback to raw ID if the locale is inexplicably missing
-                translated_tags.append(display.get(lang, display.get('en', str(tid))))
+                val = display.get(lang, display.get('en', str(tid)))
+                translated_tags.append(html.escape(val))
             else:
-                translated_tags.append(str(tid))
+                translated_tags.append(html.escape(str(tid)))
         
         if translated_tags:
             text += _("lbl_tags", lang, ' • '.join(translated_tags))
@@ -63,8 +63,19 @@ async def send_profile(chat_id: int, profile: dict, kb, lang: str, tag_service: 
                 cap = final_text if i == 0 else None
                 if m['type'] == 'photo': media_group.append(InputMediaPhoto(media=m['file_id'], caption=cap))
                 elif m['type'] == 'video': media_group.append(InputMediaVideo(media=m['file_id'], caption=cap))
-            await bot.send_media_group(chat_id, media=media_group)
-            await bot.send_message(chat_id, _("lbl_options", lang), reply_markup=kb)
+            
+            if len(media_group) >= 2:
+                await bot.send_media_group(chat_id, media=media_group)
+                await bot.send_message(chat_id, _("lbl_options", lang), reply_markup=kb)
+            elif len(media_group) == 1:
+                m_item = media_group[0]
+                if isinstance(m_item, InputMediaPhoto):
+                    await bot.send_photo(chat_id, m_item.media, caption=final_text, reply_markup=kb)
+                else:
+                    await bot.send_video(chat_id, m_item.media, caption=final_text, reply_markup=kb)
+            else:
+                final_text = truncate(text, 4000)
+                await bot.send_message(chat_id, final_text, reply_markup=kb, link_preview_options=opts)
     except Exception as e:
         logger.error(f"Failed to render profile {profile['public_uuid']}: {e}")
         final_text = truncate(text, 4000)

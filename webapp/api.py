@@ -118,12 +118,14 @@ async def update_tags(
     if payload.mode == "edit":
         await profile_service.update_profile(payload.profile_id, {"tags": payload.tags})
         msg = "✅ Tags successfully updated!" if lang == "en" else "✅ Tags atualizadas com sucesso!" if lang == "pt" else "✅ Теги успешно обновлены!"
-        await bot.send_message(user_id, msg)
+        try: await bot.send_message(user_id, msg)
+        except Exception: pass
     else:
         f_data = {"require_tags": payload.require_tags, "exclude_tags": payload.exclude_tags, "any_tags": payload.any_tags}
         await profile_service.update_profile(payload.profile_id, {"filters": f_data})
         msg = "✅ Filters successfully updated!" if lang == "en" else "✅ Filtros atualizados com sucesso!" if lang == "pt" else "✅ Фильтры успешно обновлены!"
-        await bot.send_message(user_id, msg)
+        try: await bot.send_message(user_id, msg)
+        except Exception: pass
         
     return {"status": "ok"}
 
@@ -220,30 +222,40 @@ async def handle_request_endpoint(
             if not payload.selected_contact_ids: raise HTTPException(status_code=400)
                 
             active_prof = await profile_service.get_active_profile(user_id)
-            if not active_prof: raise HTTPException(status_code=400)
+            if not active_prof: raise HTTPException(status_code=400, detail="You do not have an active profile.")
                 
             private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
             shared_values = [c["value"] for c in private_contacts if c["id"] in payload.selected_contact_ids]
             
             if not shared_values:
                 raise HTTPException(status_code=400, detail="Invalid contact IDs selected.")
+                
+            initiator_prof = await profile_service.get_active_profile(req['initiator_id'])
+            if not initiator_prof:
+                raise HTTPException(status_code=400, detail="The other user's profile is no longer active.")
             
             await contact_req_service.update_status(payload.req_id, "accepted", {"target_shared_contacts": shared_values})
             
-            b_profile = await profile_service.get_active_profile(user_id)
-            await send_profile(req['initiator_id'], b_profile, None, init_lang, tag_service, custom_prefix=_("lbl_exchanged", init_lang))
-            
-            contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_values)
-            await bot.send_message(req['initiator_id'], _("mut_accepted", init_lang, contacts_text))
+            try:
+                await send_profile(req['initiator_id'], active_prof, None, init_lang, tag_service, custom_prefix=_("lbl_exchanged", init_lang))
+                contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_values)
+                await bot.send_message(req['initiator_id'], _("mut_accepted", init_lang, contacts_text))
+            except Exception as e:
+                logger.warning(f"Could not notify initiator {req['initiator_id']} of request completion: {e}")
             
             initiator_shared = req.get("shared_contacts", [])
             if initiator_shared:
-                a_profile = await profile_service.get_active_profile(req['initiator_id'])
-                await send_profile(user_id, a_profile, None, tgt_lang, tag_service, custom_prefix=_("lbl_exchanged", tgt_lang))
-                init_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in initiator_shared)
-                await bot.send_message(user_id, _("mut_complete", tgt_lang, init_contacts_text))
+                try:
+                    await send_profile(user_id, initiator_prof, None, tgt_lang, tag_service, custom_prefix=_("lbl_exchanged", tgt_lang))
+                    init_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in initiator_shared)
+                    await bot.send_message(user_id, _("mut_complete", tgt_lang, init_contacts_text))
+                except Exception as e:
+                    logger.warning(f"Could not deliver initiator profile/contacts to acceptor {user_id}: {e}")
             else:
-                await bot.send_message(user_id, "✅ Exchange complete.")
+                try:
+                    await bot.send_message(user_id, "✅ Exchange complete.")
+                except Exception as e:
+                    logger.warning(f"Could not notify acceptor {user_id} of completion confirmation: {e}")
             return {"status": "ok"}
             
         raise HTTPException(status_code=400, detail="Invalid action")

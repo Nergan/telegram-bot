@@ -77,7 +77,22 @@ async def fsm_clear(message: types.Message, state: FSMContext, lang: str, profil
     await edit_info_menu(message, lang, profile_service)
 
 @router.message()
-async def unhandled_message(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService):
+async def unhandled_message(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService, mongo_db=None):
+    if message.media_group_id:
+        if mongo_db:
+            try:
+                processed = await mongo_db.db.processed_albums.find_one({"media_group_id": message.media_group_id})
+                if processed:
+                    return
+            except Exception:
+                pass
+        try:
+            from bot.handlers.profile import PROCESSED_ALBUMS_MEM
+            if message.media_group_id in PROCESSED_ALBUMS_MEM:
+                return
+        except Exception:
+            pass
+
     curr_state = await state.get_state()
     if curr_state:
         await message.answer(_("err_fsm", lang))
