@@ -3,6 +3,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import Update
 from core.database import Database
 from core.locales import _
+from core.config import DATA_SPEED_LIMIT, KEYBOARD_SPEED_LIMIT
 
 # In-memory throttle state: keeps track of the last action timestamp
 THROTTLE_STORE = {}
@@ -27,7 +28,7 @@ class AdvancedMiddleware(BaseMiddleware):
             
             # EXEMPTion: If the message is part of an album, do not apply the rate limit
             is_media_group = event.message.media_group_id is not None
-            if not is_media_group and (now - THROTTLE_STORE.get(user_id, 0) < 0.8):
+            if not is_media_group and (now - THROTTLE_STORE.get(user_id, 0) < DATA_SPEED_LIMIT):
                 return # Drop standard spam messages entirely
             
             THROTTLE_STORE[user_id] = now
@@ -45,7 +46,7 @@ class AdvancedMiddleware(BaseMiddleware):
             
             # Callback Throttling (0.5s)
             now = time.time()
-            if now - THROTTLE_STORE.get(user_id, 0) < 0.5:
+            if now - THROTTLE_STORE.get(user_id, 0) < KEYBOARD_SPEED_LIMIT:
                 return await event.callback_query.answer()
             THROTTLE_STORE[user_id] = now
             
