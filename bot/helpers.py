@@ -2,8 +2,8 @@ import html
 import logging
 from aiogram.types import LinkPreviewOptions, InputMediaPhoto, InputMediaVideo
 from bot.bot_setup import bot
-from core.locales import _
-from core.database import Database
+from infrastructure.locales import _
+from application.services import TagService
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +11,7 @@ def truncate(text: str, limit: int = 4000) -> str:
     if not text: return ""
     return text if len(text) <= limit else text[:limit-3] + "..."
 
-async def send_profile(chat_id: int, profile: dict, kb, lang: str, custom_prefix: str = ""):
+async def send_profile(chat_id: int, profile: dict, kb, lang: str, tag_service: TagService, custom_prefix: str = ""):
     await bot.send_chat_action(chat_id, "typing")
     text = custom_prefix + _("lbl_id", lang, profile['public_uuid'])
         
@@ -26,11 +26,9 @@ async def send_profile(chat_id: int, profile: dict, kb, lang: str, custom_prefix
         text += "\n"
         
     if profile.get('tags'): 
-        # Multi-lang tag translation dynamically from Database
-        tag_docs = await Database.get_tags_by_ids(profile['tags'])
+        tag_docs = await tag_service.get_tags_by_ids(profile['tags'])
         translated_tags = []
         for tid in profile['tags']:
-            # Find the fetched doc to maintain original order
             tag_def = next((t for t in tag_docs if t['_id'] == tid), None)
             if tag_def:
                 translated_tags.append(tag_def['display'].get(lang, tag_def['display']['en']))

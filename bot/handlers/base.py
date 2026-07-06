@@ -5,24 +5,29 @@ from aiogram.fsm.context import FSMContext
 from bot.states import ProfileSetup
 from bot.keyboards import main_menu_kb, profile_inline_kb
 from bot.helpers import send_profile
-from core.database import Database
-from core.locales import _, _btn
+from infrastructure.locales import _, _btn
+from application.services import UserService, ProfileService, ContactRequestService, TagService
 
 router = Router()
 logger = logging.getLogger(__name__)
 
 @router.message(Command("lang_en", "lang_ru", "lang_pt"))
-async def switch_language(message: types.Message, state: FSMContext, lang: str):
+async def switch_language(
+    message: types.Message, state: FSMContext, lang: str, 
+    user_service: UserService, profile_service: ProfileService, contact_req_service: ContactRequestService, tag_service: TagService
+):
     new_lang = message.text.split("_")[1]
-    await Database.set_user_lang(message.from_user.id, new_lang)
+    await user_service.set_lang(message.from_user.id, new_lang)
     await message.answer(f"✅ Language updated to: {new_lang.upper()}")
-    # Re-run menu loader with new lang
-    await show_main_menu(message, state, lang=new_lang)
+    await show_main_menu(message, state, new_lang, profile_service, contact_req_service, tag_service)
 
 @router.message(CommandStart())
 @router.message(Command("help", "hello"))
 @router.message(F.text.in_(_btn("btn_view_active")))
-async def show_main_menu(message: types.Message, state: FSMContext, lang: str):
+async def show_main_menu(
+    message: types.Message, state: FSMContext, lang: str,
+    profile_service: ProfileService, contact_req_service: ContactRequestService, tag_service: TagService
+):
     await state.clear()
     logger.info(f"User {message.from_user.id} accessed main menu.")
     
@@ -30,25 +35,25 @@ async def show_main_menu(message: types.Message, state: FSMContext, lang: str):
     if is_help_command:
         await message.answer(_("help_cmd", lang))
         
-    active_profile = await Database.get_or_create_active_profile(message.from_user.id, message.from_user.username)
+    active_profile = await profile_service.get_or_create_active_profile(message.from_user.id, message.from_user.username)
     
     if active_profile:
-        pool_size = await Database.get_pool_size(message.from_user.id, active_profile.get("filters", {}))
-        sent_c, recv_c = await Database.get_requests_counts(message.from_user.id)
+        pool_size = await profile_service.get_pool_size(message.from_user.id, active_profile.get("filters", {}))
+        sent_c, recv_c = await contact_req_service.get_requests_counts(message.from_user.id)
         
         await message.answer(_("menu_active", lang), reply_markup=main_menu_kb(lang, pool_size, has_active=True))
-        await send_profile(message.chat.id, active_profile, profile_inline_kb(lang, active_profile['public_uuid'], sent_c, recv_c), lang)
+        await send_profile(message.chat.id, active_profile, profile_inline_kb(lang, active_profile['public_uuid'], sent_c, recv_c), lang, tag_service)
     else:
         await message.answer(_("menu_no_active", lang), reply_markup=main_menu_kb(lang, 0, has_active=False))
 
 @router.message(StateFilter("*"), F.text.in_(_btn("btn_cancel")))
-async def fsm_cancel(message: types.Message, state: FSMContext, lang: str):
+async def fsm_cancel(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService):
     await state.clear()
     from bot.handlers.profile import edit_info_menu
-    await edit_info_menu(message, lang)
+    await edit_info_menu(message, lang, profile_service)
 
 @router.message(StateFilter("*"), F.text.in_(_btn("btn_clear")))
-async def fsm_clear(message: types.Message, state: FSMContext, lang: str):
+async def fsm_clear(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService):
     curr_state = await state.get_state()
     field_map = {
         ProfileSetup.waiting_for_bio: "text",
@@ -57,29 +62,29 @@ async def fsm_clear(message: types.Message, state: FSMContext, lang: str):
     }
     field = field_map.get(curr_state)
     if field:
-        active_prof = await Database.get_active_profile(message.from_user.id)
+        active_prof = await profile_service.get_active_profile(message.from_user.id)
         if active_prof:
             val = [] if field in ["media", "contacts"] else None
-            await Database.db.profiles.update_one({"public_uuid": active_prof['public_uuid']}, {"$set": {field: val}})
+            await profile_service.update_profile(active_prof['public_uuid'], {field: val})
             logger.info(f"User {message.from_user.id} cleared {field}.")
             
     await state.clear()
     from bot.handlers.profile import edit_info_menu
-    await edit_info_menu(message, lang)
+    await edit_info_menu(message, lang, profile_service)
 
 @router.message()
-async def unhandled_message(message: types.Message, state: FSMContext, lang: str):
+async def unhandled_message(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService):
     curr_state = await state.get_state()
     if curr_state:
         await message.answer(_("err_fsm", lang))
     else:
-        active = await Database.get_active_profile(message.from_user.id)
+        active = await profile_service.get_active_profile(message.from_user.id)
         if active:
-            pool_size = await Database.get_pool_size(message.from_user.id, active.get("filters", {}))
+            pool_size = await profile_service.get_pool_size(message.from_user.id, active.get("filters", {}))
             await message.answer(_("err_unknown", lang), reply_markup=main_menu_kb(lang, pool_size, True))
         else:
-            has_any = await Database.db.profiles.count_documents({"user_id": message.from_user.id}) > 0
-            if has_any:
+            all_profs = await profile_service.get_all_by_user(message.from_user.id)
+            if len(all_profs) > 0:
                 await message.answer(_("err_unknown", lang), reply_markup=main_menu_kb(lang, 0, False))
             else:
                 await message.answer(_("err_start", lang))

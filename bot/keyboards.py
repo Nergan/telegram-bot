@@ -1,6 +1,6 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
-from core.config import WEBHOOK_URL
-from core.locales import _
+from infrastructure.config import WEBHOOK_URL
+from infrastructure.locales import _
 
 def main_menu_kb(lang: str, pool_size: int = 0, has_active: bool = True) -> ReplyKeyboardMarkup:
     if not has_active:
