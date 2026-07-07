@@ -55,7 +55,7 @@ async def manage_contacts_menu(message: types.Message, lang: str, profile_servic
 
 @router.callback_query(F.data == "add_contact_fsm")
 async def add_contact_fsm_start(callback: types.CallbackQuery, state: FSMContext, lang: str, profile_service: ProfileService):
-    active_prof = await profile_service.get_active_profile(callback.fromuser.id if hasattr(callback, 'from_user') else callback.from_user.id)
+    active_prof = await profile_service.get_active_profile(callback.from_user.id)
     if not active_prof: return await callback.answer(_("prof_not_found", lang), show_alert=True)
     
     await state.set_state(ProfileSetup.waiting_for_contact_val)
