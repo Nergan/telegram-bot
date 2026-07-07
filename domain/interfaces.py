@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
+from domain.models import Profile, ProfileFilters, ContactRequestModel, Tag, MediaItem
 
 class IUserRepository(ABC):
     @abstractmethod
@@ -29,60 +30,60 @@ class IUserRepository(ABC):
 
 class IProfileRepository(ABC):
     @abstractmethod
-    async def get_by_uuid(self, public_uuid: str) -> Optional[Dict[str, Any]]: pass
+    async def get_by_uuid(self, public_uuid: str) -> Optional[Profile]: pass
     
     @abstractmethod
-    async def get_active_by_user(self, user_id: int) -> Optional[Dict[str, Any]]: pass
+    async def get_active_by_user(self, user_id: int) -> Optional[Profile]: pass
     
     @abstractmethod
     async def count_by_user(self, user_id: int) -> int: pass
     
     @abstractmethod
-    async def create(self, profile: Dict[str, Any]) -> Dict[str, Any]: pass
+    async def create(self, profile: Profile) -> Profile: pass
     
     @abstractmethod
-    async def update(self, public_uuid: str, update_data: Dict[str, Any]) -> None: pass
+    async def update(self, profile: Profile) -> None: pass
     
     @abstractmethod
-    async def update_by_id(self, _id: Any, update_data: Dict[str, Any]) -> None: pass
-    
-    @abstractmethod
-    async def update_many_by_user(self, user_id: int, update_data: Dict[str, Any]) -> None: pass
+    async def deactivate_all_for_user(self, user_id: int) -> None: pass
     
     @abstractmethod
     async def delete(self, user_id: int, public_uuid: str) -> None: pass
     
     @abstractmethod
-    async def delete_many(self, query: Dict[str, Any]) -> None: pass
+    async def delete_inactive_for_user(self, user_id: int) -> None: pass
     
     @abstractmethod
-    async def get_last_by_user(self, user_id: int) -> Optional[Dict[str, Any]]: pass
+    async def delete_all_except(self, user_id: int, keep_uuid: str) -> None: pass
     
     @abstractmethod
-    async def get_pool_size(self, user_id: int, filters: Optional[Dict[str, Any]] = None) -> int: pass
+    async def get_last_by_user(self, user_id: int) -> Optional[Profile]: pass
     
     @abstractmethod
-    async def find_one_matching(self, query: Dict[str, Any], sort_args: List[Tuple[str, int]]) -> Optional[Dict[str, Any]]: pass
+    async def get_pool_size(self, user_id: int, filters: ProfileFilters) -> int: pass
     
     @abstractmethod
-    async def get_all_by_user(self, user_id: int) -> List[Dict[str, Any]]: pass
+    async def find_next_match(self, user_id: int, seen_uuids: List[str], filters: ProfileFilters, random_index: float, direction: int) -> Optional[Profile]: pass
     
     @abstractmethod
-    async def get_all_missing_random_index(self) -> List[Dict[str, Any]]: pass
+    async def get_all_by_user(self, user_id: int) -> List[Profile]: pass
+    
+    @abstractmethod
+    async def get_all_missing_random_index(self) -> List[Profile]: pass
 
 
 class IContactRequestRepository(ABC):
     @abstractmethod
-    async def create(self, request_doc: Dict[str, Any]) -> None: pass
+    async def create(self, request_model: ContactRequestModel) -> None: pass
     
     @abstractmethod
-    async def get_by_req_id(self, req_id: str) -> Optional[Dict[str, Any]]: pass
+    async def get_by_req_id(self, req_id: str) -> Optional[ContactRequestModel]: pass
     
     @abstractmethod
-    async def get_pending_by_initiator_target_action(self, initiator_id: int, target_id: int, action: str) -> Optional[Dict[str, Any]]: pass
+    async def get_pending_by_initiator_target_action(self, initiator_id: int, target_id: int, action: str) -> Optional[ContactRequestModel]: pass
     
     @abstractmethod
-    async def update_status(self, req_id: str, status: str, extra_data: Optional[Dict[str, Any]] = None) -> None: pass
+    async def update(self, request_model: ContactRequestModel) -> None: pass
     
     @abstractmethod
     async def count_pending_by_initiator(self, initiator_id: int) -> int: pass
@@ -94,15 +95,32 @@ class IContactRequestRepository(ABC):
     async def get_pending_actions(self, initiator_id: int, target_id: int) -> List[str]: pass
     
     @abstractmethod
-    async def get_pending_by_initiator(self, initiator_id: int) -> List[Dict[str, Any]]: pass
+    async def get_pending_by_initiator(self, initiator_id: int) -> List[ContactRequestModel]: pass
     
     @abstractmethod
-    async def get_pending_by_target(self, target_id: int) -> List[Dict[str, Any]]: pass
+    async def get_pending_by_target(self, target_id: int) -> List[ContactRequestModel]: pass
 
 
 class ITagRepository(ABC):
     @abstractmethod
-    async def get_by_ids(self, tag_ids: List[str]) -> List[Dict[str, Any]]: pass
+    async def get_by_ids(self, tag_ids: List[str]) -> List[Tag]: pass
     
     @abstractmethod
-    async def search(self, query: str, limit: int = 50) -> List[Dict[str, Any]]: pass
+    async def search(self, query: str, limit: int = 50) -> List[Tag]: pass
+
+
+class IAlbumRepository(ABC):
+    @abstractmethod
+    async def is_processed(self, media_group_id: str) -> bool: pass
+    
+    @abstractmethod
+    async def mark_processed(self, media_group_id: str) -> None: pass
+    
+    @abstractmethod
+    async def add_to_buffer(self, media_group_id: str, media_item: MediaItem) -> List[MediaItem]: pass
+    
+    @abstractmethod
+    async def get_and_clear_buffer(self, media_group_id: str) -> List[MediaItem]: pass
+    
+    @abstractmethod
+    async def clear_buffer(self, media_group_id: str) -> None: pass

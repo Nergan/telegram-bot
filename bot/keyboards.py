@@ -1,6 +1,8 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
 from infrastructure.config import WEBHOOK_URL
 from infrastructure.locales import _
+from typing import List
+from domain.models import Contact
 
 def main_menu_kb(lang: str, pool_size: int = 0, has_active: bool = True) -> ReplyKeyboardMarkup:
     if not has_active:
@@ -89,12 +91,12 @@ def browse_inline_kb(lang: str, target_uuid: str, has_self_private: bool = True,
         ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def manage_contacts_inline_kb(lang: str, contacts: list) -> InlineKeyboardMarkup:
+def manage_contacts_inline_kb(lang: str, contacts: List[Contact]) -> InlineKeyboardMarkup:
     keyboard = []
     for c in contacts:
-        cid = c["id"]
-        val_truncated = c["value"][:12] + "..." if len(c["value"]) > 15 else c["value"]
-        vis_text = "🌐" if c.get("is_public") else "🔒"
+        cid = c.id
+        val_truncated = c.value[:12] + "..." if len(c.value) > 15 else c.value
+        vis_text = "🌐" if c.is_public else "🔒"
         row = [InlineKeyboardButton(text=f"{vis_text} ({val_truncated})", callback_data=f"togglecon_{cid}")]
         if cid != "tg_username":
             row.append(InlineKeyboardButton(text="🗑️", callback_data=f"delcon_{cid}"))
@@ -102,12 +104,12 @@ def manage_contacts_inline_kb(lang: str, contacts: list) -> InlineKeyboardMarkup
     keyboard.append([InlineKeyboardButton(text="➕", callback_data="add_contact_fsm")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def contact_share_selection_kb(lang: str, private_contacts: list, selected_ids: list, action: str) -> InlineKeyboardMarkup:
+def contact_share_selection_kb(lang: str, private_contacts: List[Contact], selected_ids: list, action: str) -> InlineKeyboardMarkup:
     keyboard = []
     for c in private_contacts:
-        cid = c["id"]
+        cid = c.id
         prefix = "✅ " if cid in selected_ids else "⬜ "
-        val_truncated = c["value"][:18] + "..." if len(c["value"]) > 21 else c["value"]
+        val_truncated = c.value[:18] + "..." if len(c.value) > 21 else c.value
         keyboard.append([InlineKeyboardButton(text=f"{prefix}{val_truncated}", callback_data=f"selcon_{cid}")])
     btn_text = _("btn_confirm_share", lang)
     keyboard.append([InlineKeyboardButton(text=btn_text, callback_data="confirm_share_contacts")])

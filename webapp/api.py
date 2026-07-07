@@ -14,7 +14,6 @@ from application.services import UserService, ProfileService, TagService, Contac
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# FastAPI Service Dependencies
 def get_user_svc(request: Request) -> UserService: return request.app.state.user_service
 def get_profile_svc(request: Request) -> ProfileService: return request.app.state.profile_service
 def get_tag_svc(request: Request) -> TagService: return request.app.state.tag_service
@@ -64,22 +63,22 @@ async def get_profile_data(
     
     p = await profile_service.get_profile_by_uuid(payload.profile_id)
     if not p: raise HTTPException(status_code=404)
-    if p.get("user_id") != user_data['id']: raise HTTPException(status_code=403, detail="Access denied")
+    if p.user_id != user_data['id']: raise HTTPException(status_code=403, detail="Access denied")
     
-    active_tags_data = await tag_service.get_tags_by_ids(p.get("tags", []))
-    active_tags = [{"id": t["_id"], "display": t["display"]} for t in active_tags_data]
+    active_tags_data = await tag_service.get_tags_by_ids(p.tags)
+    active_tags = [{"id": t._id, "display": t.display} for t in active_tags_data]
     
-    f_data = p.get("filters", {})
-    req_tags_data = await tag_service.get_tags_by_ids(f_data.get("require_tags", []))
-    exc_tags_data = await tag_service.get_tags_by_ids(f_data.get("exclude_tags", []))
-    any_tags_data = await tag_service.get_tags_by_ids(f_data.get("any_tags", []))
+    f_data = p.filters
+    req_tags_data = await tag_service.get_tags_by_ids(f_data.require_tags)
+    exc_tags_data = await tag_service.get_tags_by_ids(f_data.exclude_tags)
+    any_tags_data = await tag_service.get_tags_by_ids(f_data.any_tags)
     
     return {
         "tags": active_tags, 
         "filters": {
-            "require_tags": [{"id": t["_id"], "display": t["display"]} for t in req_tags_data],
-            "exclude_tags": [{"id": t["_id"], "display": t["display"]} for t in exc_tags_data],
-            "any_tags": [{"id": t["_id"], "display": t["display"]} for t in any_tags_data]
+            "require_tags": [{"id": t._id, "display": t.display} for t in req_tags_data],
+            "exclude_tags": [{"id": t._id, "display": t.display} for t in exc_tags_data],
+            "any_tags": [{"id": t._id, "display": t.display} for t in any_tags_data]
         }
     }
 
@@ -94,7 +93,7 @@ async def search_tags_endpoint(
     if await user_service.is_banned(user_data['id']): raise HTTPException(status_code=403, detail="Banned")
     
     tags = await tag_service.search_tags(payload.query, limit=50)
-    formatted_tags = [{"id": t["_id"], "display": t["display"]} for t in tags]
+    formatted_tags = [{"id": t._id, "display": t.display} for t in tags]
     return {"tags": formatted_tags}
 
 @router.post("/api/update")
@@ -110,19 +109,22 @@ async def update_tags(
     if await user_service.is_banned(user_id): raise HTTPException(status_code=403, detail="Banned")
     
     p = await profile_service.get_profile_by_uuid(payload.profile_id)
-    if not p or p.get("user_id") != user_id: 
+    if not p or p.user_id != user_id: 
         raise HTTPException(status_code=403, detail="Access denied")
     
     lang = await user_service.get_lang(user_id)
     
     if payload.mode == "edit":
-        await profile_service.update_profile(payload.profile_id, {"tags": payload.tags})
+        p.tags = payload.tags
+        await profile_service.update_profile(p)
         msg = "✅ Tags successfully updated!" if lang == "en" else "✅ Tags atualizadas com sucesso!" if lang == "pt" else "✅ Теги успешно обновлены!"
         try: await bot.send_message(user_id, msg)
         except Exception: pass
     else:
-        f_data = {"require_tags": payload.require_tags, "exclude_tags": payload.exclude_tags, "any_tags": payload.any_tags}
-        await profile_service.update_profile(payload.profile_id, {"filters": f_data})
+        p.filters.require_tags = payload.require_tags
+        p.filters.exclude_tags = payload.exclude_tags
+        p.filters.any_tags = payload.any_tags
+        await profile_service.update_profile(p)
         msg = "✅ Filters successfully updated!" if lang == "en" else "✅ Filtros atualizados com sucesso!" if lang == "pt" else "✅ Фильтры успешно обновлены!"
         try: await bot.send_message(user_id, msg)
         except Exception: pass
@@ -145,7 +147,7 @@ async def get_requests_endpoint(
         if await user_service.is_banned(user_id): raise HTTPException(status_code=403, detail="Banned")
             
         my_active = await profile_service.get_active_profile(user_id)
-        my_private_contacts = [{"id": c["id"], "value": c["value"]} for c in my_active.get("contacts", []) if not c.get("is_public")] if my_active else []
+        my_private_contacts = [{"id": c.id, "value": c.value} for c in my_active.contacts if not c.is_public] if my_active else []
             
         sent_list = await contact_req_service.get_pending_by_initiator(user_id)
         recv_list = await contact_req_service.get_pending_by_target(user_id)
@@ -153,24 +155,24 @@ async def get_requests_endpoint(
         async def format_requests(req_list, target_key):
             formatted = []
             for r in req_list:
-                uid = r.get(target_key)
+                uid = getattr(r, target_key)
                 if not uid: continue
                 other_profile = await profile_service.get_active_profile(uid)
                 if not other_profile: continue
                 
-                tags_data = await tag_service.get_tags_by_ids(other_profile.get("tags", []))
-                formatted_tags = [{"id": t["_id"], "display": t["display"]} for t in tags_data]
+                tags_data = await tag_service.get_tags_by_ids(other_profile.tags)
+                formatted_tags = [{"id": t._id, "display": t.display} for t in tags_data]
                     
                 formatted.append({
-                    "req_id": r.get("req_id", ""), "action": r.get("action", "req"),
-                    "status": "pending", "message": r.get("message", ""),
-                    "shared_contacts": r.get("shared_contacts", []),
+                    "req_id": r.req_id, "action": r.action,
+                    "status": "pending", "message": r.message or "",
+                    "shared_contacts": r.shared_contacts,
                     "other_profile": {
-                        "public_uuid": other_profile.get("public_uuid", ""),
-                        "bio": other_profile.get("text", "") or "",
+                        "public_uuid": other_profile.public_uuid,
+                        "bio": other_profile.text or "",
                         "tags": formatted_tags,
-                        "public_contacts": [c.get("value", "") for c in other_profile.get("contacts", []) if c.get("is_public")],
-                        "media_count": len(other_profile.get("media", []))
+                        "public_contacts": [c.value for c in other_profile.contacts if c.is_public],
+                        "media_count": len(other_profile.media)
                     }
                 })
             return formatted
@@ -202,48 +204,48 @@ async def handle_request_endpoint(
         req = await contact_req_service.get_request(payload.req_id)
         if not req: raise HTTPException(status_code=404, detail="Request not found")
             
-        init_lang = await user_service.get_lang(req['initiator_id'])
+        init_lang = await user_service.get_lang(req.initiator_id)
         tgt_lang = await user_service.get_lang(user_id)
             
         if payload.action == "decline":
-            if req['target_id'] != user_id or req['status'] != 'pending': raise HTTPException(status_code=403)
+            if req.target_id != user_id or req.status != 'pending': raise HTTPException(status_code=403)
             await contact_req_service.update_status(payload.req_id, "declined")
-            try: await bot.send_message(req['initiator_id'], _("mut_declined", init_lang))
+            try: await bot.send_message(req.initiator_id, _("mut_declined", init_lang))
             except Exception: pass
             return {"status": "ok"}
             
         elif payload.action == "viewed":
-            if req['target_id'] != user_id or req['status'] != 'pending': raise HTTPException(status_code=403)
+            if req.target_id != user_id or req.status != 'pending': raise HTTPException(status_code=403)
             await contact_req_service.update_status(payload.req_id, "viewed")
             return {"status": "ok"}
             
         elif payload.action == "accept":
-            if req['target_id'] != user_id or req['status'] != 'pending': raise HTTPException(status_code=403)
+            if req.target_id != user_id or req.status != 'pending': raise HTTPException(status_code=403)
             if not payload.selected_contact_ids: raise HTTPException(status_code=400)
                 
             active_prof = await profile_service.get_active_profile(user_id)
             if not active_prof: raise HTTPException(status_code=400, detail="You do not have an active profile.")
                 
-            private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
-            shared_values = [c["value"] for c in private_contacts if c["id"] in payload.selected_contact_ids]
+            private_contacts = [c for c in active_prof.contacts if not c.is_public]
+            shared_values = [c.value for c in private_contacts if c.id in payload.selected_contact_ids]
             
             if not shared_values:
                 raise HTTPException(status_code=400, detail="Invalid contact IDs selected.")
                 
-            initiator_prof = await profile_service.get_active_profile(req['initiator_id'])
+            initiator_prof = await profile_service.get_active_profile(req.initiator_id)
             if not initiator_prof:
                 raise HTTPException(status_code=400, detail="The other user's profile is no longer active.")
             
-            await contact_req_service.update_status(payload.req_id, "accepted", {"target_shared_contacts": shared_values})
+            await contact_req_service.update_status(payload.req_id, "accepted", shared_values)
             
             try:
-                await send_profile(req['initiator_id'], active_prof, None, init_lang, tag_service, custom_prefix=_("lbl_exchanged", init_lang))
+                await send_profile(req.initiator_id, active_prof, None, init_lang, tag_service, custom_prefix=_("lbl_exchanged", init_lang))
                 contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_values)
-                await bot.send_message(req['initiator_id'], _("mut_accepted", init_lang, contacts_text))
+                await bot.send_message(req.initiator_id, _("mut_accepted", init_lang, contacts_text))
             except Exception as e:
-                logger.warning(f"Could not notify initiator {req['initiator_id']} of request completion: {e}")
+                logger.warning(f"Could not notify initiator {req.initiator_id} of request completion: {e}")
             
-            initiator_shared = req.get("shared_contacts", [])
+            initiator_shared = req.shared_contacts
             if initiator_shared:
                 try:
                     await send_profile(user_id, initiator_prof, None, tgt_lang, tag_service, custom_prefix=_("lbl_exchanged", tgt_lang))
@@ -283,10 +285,10 @@ async def send_profile_to_chat_endpoint(
         req = await contact_req_service.get_request(payload.req_id)
         if not req: raise HTTPException(status_code=404, detail="Request not found")
         
-        if user_id not in (req['initiator_id'], req['target_id']):
+        if user_id not in (req.initiator_id, req.target_id):
             raise HTTPException(status_code=403, detail="Access denied")
         
-        target_user_id = req['target_id'] if req['initiator_id'] == user_id else req['initiator_id']
+        target_user_id = req.target_id if req.initiator_id == user_id else req.initiator_id
         profile_to_send = await profile_service.get_active_profile(target_user_id)
         if not profile_to_send: raise HTTPException(status_code=404, detail="Target profile no longer exists.")
         

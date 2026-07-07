@@ -8,18 +8,15 @@ from bot.states import ProfileSetup
 from bot.keyboards import edit_info_menu_kb, cancel_fsm_kb, manage_contacts_inline_kb
 from infrastructure.locales import _, _btn
 from application.services import ProfileService
+from domain.models import Contact
 
 router = Router()
 logger = logging.getLogger(__name__)
 
 async def verify_contact(val: str, lang: str) -> tuple[bool, str]:
     val = val.strip()
-    
-    # 1. Email check
     if re.match(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', val): 
         return True, val
-        
-    # 2. Phone check
     if re.match(r'^\+?[0-9\s\-\(\)]{7,20}$', val) and any(c.isdigit() for c in val):
         try:
             import phonenumbers
@@ -28,17 +25,12 @@ async def verify_contact(val: str, lang: str) -> tuple[bool, str]:
                 return True, phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL)
         except Exception: 
             pass
-            
-    # 3. URL check (fully offline validation to eliminate SSRF vulnerability and false-negatives)
     url_pattern = re.compile(r'^(https?://)?([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(/[^\s]*)?$')
     if url_pattern.match(val):
         test_url = val if val.startswith('http') else 'https://' + val
         return True, test_url
-
-    # 4. Location / Social Alphanumeric Handle fallback (Unicode support matching to prevent blocks)
     if re.match(r'^[-\w\s,\.\'\(\)\@+]{3,60}$', val, re.UNICODE):
         return True, val
-
     return False, _("con_add_instr", lang)
 
 @router.message(F.text.in_(_btn("btn_contacts")))
@@ -49,12 +41,12 @@ async def manage_contacts_menu(message: types.Message, lang: str, profile_servic
     await profile_service.sync_telegram_username(active_prof, message.from_user.username)
     active_prof = await profile_service.get_active_profile(message.from_user.id)
     
-    contacts = active_prof.get("contacts", [])
+    contacts = active_prof.contacts
     text = _("con_manage", lang)
     if contacts:
         for i, c in enumerate(contacts):
-            visibility = _("con_pub", lang) if c.get("is_public") else _("con_priv", lang)
-            text += f"{i+1}. <code>{html.escape(c['value'])}</code> ({visibility})\n"
+            visibility = _("con_pub", lang) if c.is_public else _("con_priv", lang)
+            text += f"{i+1}. <code>{html.escape(c.value)}</code> ({visibility})\n"
     else:
         text += _("con_none", lang)
         
@@ -63,7 +55,7 @@ async def manage_contacts_menu(message: types.Message, lang: str, profile_servic
 
 @router.callback_query(F.data == "add_contact_fsm")
 async def add_contact_fsm_start(callback: types.CallbackQuery, state: FSMContext, lang: str, profile_service: ProfileService):
-    active_prof = await profile_service.get_active_profile(callback.from_user.id)
+    active_prof = await profile_service.get_active_profile(callback.fromuser.id if hasattr(callback, 'from_user') else callback.from_user.id)
     if not active_prof: return await callback.answer(_("prof_not_found", lang), show_alert=True)
     
     await state.set_state(ProfileSetup.waiting_for_contact_val)
@@ -83,8 +75,7 @@ async def capture_new_contact(message: types.Message, state: FSMContext, lang: s
     active_prof = await profile_service.get_active_profile(user_id)
     if not active_prof: return await message.answer(_("prof_not_found", lang))
     
-    contacts = active_prof.get("contacts", [])
-    if len(contacts) >= 8:
+    if len(active_prof.contacts) >= 8:
         await state.clear()
         await message.answer(_("con_max", lang), reply_markup=edit_info_menu_kb(lang))
         await manage_contacts_menu(message, lang, profile_service)
@@ -105,9 +96,9 @@ async def capture_new_contact(message: types.Message, state: FSMContext, lang: s
     if len(result_val) > 100: result_val = result_val[:97] + "..."
     
     cid = uuid.uuid4().hex[:8]
-    contacts.append({"id": cid, "type": "custom", "value": result_val, "is_public": False})
+    active_prof.contacts.append(Contact(id=cid, type="custom", value=result_val, is_public=False))
     
-    await profile_service.update_profile(active_prof['public_uuid'], {"contacts": contacts})
+    await profile_service.update_profile(active_prof)
     
     await message.answer(_("con_added", lang), reply_markup=edit_info_menu_kb(lang))
     await state.clear()
@@ -119,24 +110,23 @@ async def toggle_contact_visibility(callback: types.CallbackQuery, lang: str, pr
     active_prof = await profile_service.get_active_profile(callback.from_user.id)
     if not active_prof: return await callback.answer(_("prof_not_found", lang), show_alert=True)
     
-    contacts = active_prof.get("contacts", [])
     updated = False
-    for c in contacts:
-        if c.get("id") == cid:
-            c["is_public"] = not c.get("is_public", False)
+    for c in active_prof.contacts:
+        if c.id == cid:
+            c.is_public = not c.is_public
             updated = True
             break
             
     if updated:
-        await profile_service.update_profile(active_prof['public_uuid'], {"contacts": contacts})
+        await profile_service.update_profile(active_prof)
         await callback.answer(_("con_toggled", lang))
         
-        active_prof = await profile_service.get_profile_by_uuid(active_prof["public_uuid"])
-        contacts = active_prof.get("contacts", [])
+        active_prof = await profile_service.get_profile_by_uuid(active_prof.public_uuid)
+        contacts = active_prof.contacts
         text = _("con_manage", lang)
         for i, c in enumerate(contacts):
-            visibility = _("con_pub", lang) if c.get("is_public") else _("con_priv", lang)
-            text += f"{i+1}. <code>{html.escape(c['value'])}</code> ({visibility})\n"
+            visibility = _("con_pub", lang) if c.is_public else _("con_priv", lang)
+            text += f"{i+1}. <code>{html.escape(c.value)}</code> ({visibility})\n"
             
         await callback.message.edit_text(text, reply_markup=manage_contacts_inline_kb(lang, contacts))
     else:
@@ -150,17 +140,17 @@ async def delete_contact(callback: types.CallbackQuery, lang: str, profile_servi
     active_prof = await profile_service.get_active_profile(callback.from_user.id)
     if not active_prof: return await callback.answer(_("prof_not_found", lang), show_alert=True)
     
-    contacts = [c for c in active_prof.get("contacts", []) if c.get("id") != cid]
-    await profile_service.update_profile(active_prof['public_uuid'], {"contacts": contacts})
+    active_prof.contacts = [c for c in active_prof.contacts if c.id != cid]
+    await profile_service.update_profile(active_prof)
     await callback.answer(_("con_deleted", lang))
     
-    active_prof = await profile_service.get_profile_by_uuid(active_prof["public_uuid"])
+    active_prof = await profile_service.get_profile_by_uuid(active_prof.public_uuid)
     text = _("con_manage", lang)
-    if contacts:
-        for i, c in enumerate(contacts):
-            visibility = _("con_pub", lang) if c.get("is_public") else _("con_priv", lang)
-            text += f"{i+1}. <code>{html.escape(c['value'])}</code> ({visibility})\n"
+    if active_prof.contacts:
+        for i, c in enumerate(active_prof.contacts):
+            visibility = _("con_pub", lang) if c.is_public else _("con_priv", lang)
+            text += f"{i+1}. <code>{html.escape(c.value)}</code> ({visibility})\n"
     else:
         text += _("con_none", lang)
         
-    await callback.message.edit_text(text, reply_markup=manage_contacts_inline_kb(lang, contacts))
+    await callback.message.edit_text(text, reply_markup=manage_contacts_inline_kb(lang, active_prof.contacts))

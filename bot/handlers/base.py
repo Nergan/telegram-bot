@@ -6,7 +6,7 @@ from bot.states import ProfileSetup
 from bot.keyboards import main_menu_kb, profile_inline_kb
 from bot.helpers import send_profile
 from infrastructure.locales import _, _btn
-from application.services import UserService, ProfileService, ContactRequestService, TagService
+from application.services import UserService, ProfileService, ContactRequestService, TagService, AlbumService
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -42,11 +42,11 @@ async def show_main_menu(
     active_profile = await profile_service.get_or_create_active_profile(message.from_user.id, message.from_user.username)
     
     if active_profile:
-        pool_size = await profile_service.get_pool_size(message.from_user.id, active_profile.get("filters", {}))
+        pool_size = await profile_service.get_pool_size(message.from_user.id, active_profile.filters)
         sent_c, recv_c = await contact_req_service.get_requests_counts(message.from_user.id)
         
         await message.answer(_("menu_active", lang), reply_markup=main_menu_kb(lang, pool_size, has_active=True))
-        await send_profile(message.chat.id, active_profile, profile_inline_kb(lang, active_profile['public_uuid'], sent_c, recv_c), lang, tag_service)
+        await send_profile(message.chat.id, active_profile, profile_inline_kb(lang, active_profile.public_uuid, sent_c, recv_c), lang, tag_service)
     else:
         await message.answer(_("menu_no_active", lang), reply_markup=main_menu_kb(lang, 0, has_active=False))
 
@@ -68,8 +68,11 @@ async def fsm_clear(message: types.Message, state: FSMContext, lang: str, profil
     if field:
         active_prof = await profile_service.get_active_profile(message.from_user.id)
         if active_prof:
-            val = [] if field == "media" else None
-            await profile_service.update_profile(active_prof['public_uuid'], {field: val})
+            if field == "media":
+                active_prof.media = []
+            else:
+                active_prof.text = None
+            await profile_service.update_profile(active_prof)
             logger.info(f"User {message.from_user.id} cleared {field}.")
             
     await state.clear()
@@ -77,21 +80,10 @@ async def fsm_clear(message: types.Message, state: FSMContext, lang: str, profil
     await edit_info_menu(message, lang, profile_service)
 
 @router.message()
-async def unhandled_message(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService, mongo_db=None):
+async def unhandled_message(message: types.Message, state: FSMContext, lang: str, profile_service: ProfileService, album_service: AlbumService):
     if message.media_group_id:
-        if mongo_db:
-            try:
-                processed = await mongo_db.db.processed_albums.find_one({"media_group_id": message.media_group_id})
-                if processed:
-                    return
-            except Exception:
-                pass
-        try:
-            from bot.handlers.profile import PROCESSED_ALBUMS_MEM
-            if message.media_group_id in PROCESSED_ALBUMS_MEM:
-                return
-        except Exception:
-            pass
+        if await album_service.is_processed(message.media_group_id):
+            return
 
     curr_state = await state.get_state()
     if curr_state:
@@ -99,7 +91,7 @@ async def unhandled_message(message: types.Message, state: FSMContext, lang: str
     else:
         active = await profile_service.get_active_profile(message.from_user.id)
         if active:
-            pool_size = await profile_service.get_pool_size(message.from_user.id, active.get("filters", {}))
+            pool_size = await profile_service.get_pool_size(message.from_user.id, active.filters)
             await message.answer(_("err_unknown", lang), reply_markup=main_menu_kb(lang, pool_size, True))
         else:
             all_profs = await profile_service.get_all_by_user(message.from_user.id)

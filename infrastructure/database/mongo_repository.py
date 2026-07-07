@@ -5,7 +5,8 @@ import datetime
 import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from typing import List, Dict, Any, Optional, Tuple
-from domain.interfaces import IUserRepository, IProfileRepository, IContactRequestRepository, ITagRepository
+from domain.interfaces import IUserRepository, IProfileRepository, IContactRequestRepository, ITagRepository, IAlbumRepository
+from domain.models import Profile, ContactRequestModel, Tag, ProfileFilters, MediaItem
 
 logger = logging.getLogger(__name__)
 
@@ -117,75 +118,88 @@ class MongoProfileRepository(IProfileRepository):
     def __init__(self, mongo_db: MongoDatabase):
         self.db = mongo_db.db
 
-    async def get_by_uuid(self, public_uuid: str) -> Optional[Dict[str, Any]]:
-        return await self.db.profiles.find_one({"public_uuid": public_uuid})
+    async def get_by_uuid(self, public_uuid: str) -> Optional[Profile]:
+        doc = await self.db.profiles.find_one({"public_uuid": public_uuid})
+        return Profile.from_dict(doc) if doc else None
 
-    async def get_active_by_user(self, user_id: int) -> Optional[Dict[str, Any]]:
-        return await self.db.profiles.find_one({"user_id": user_id, "is_active": True})
+    async def get_active_by_user(self, user_id: int) -> Optional[Profile]:
+        doc = await self.db.profiles.find_one({"user_id": user_id, "is_active": True})
+        return Profile.from_dict(doc) if doc else None
 
     async def count_by_user(self, user_id: int) -> int:
         return await self.db.profiles.count_documents({"user_id": user_id})
 
-    async def create(self, profile: Dict[str, Any]) -> Dict[str, Any]:
-        res = await self.db.profiles.insert_one(profile)
-        profile["_id"] = res.inserted_id
+    async def create(self, profile: Profile) -> Profile:
+        res = await self.db.profiles.insert_one(profile.to_dict())
+        profile._id = res.inserted_id
         return profile
 
-    async def update(self, public_uuid: str, update_data: Dict[str, Any]) -> None:
-        await self.db.profiles.update_one({"public_uuid": public_uuid}, {"$set": update_data})
+    async def update(self, profile: Profile) -> None:
+        await self.db.profiles.replace_one({"_id": profile._id}, profile.to_dict())
 
-    async def update_by_id(self, _id: Any, update_data: Dict[str, Any]) -> None:
-        await self.db.profiles.update_one({"_id": _id}, {"$set": update_data})
-
-    async def update_many_by_user(self, user_id: int, update_data: Dict[str, Any]) -> None:
-        await self.db.profiles.update_many({"user_id": user_id}, {"$set": update_data})
+    async def deactivate_all_for_user(self, user_id: int) -> None:
+        await self.db.profiles.update_many({"user_id": user_id}, {"$set": {"is_active": False}})
 
     async def delete(self, user_id: int, public_uuid: str) -> None:
         await self.db.profiles.delete_one({"user_id": user_id, "public_uuid": public_uuid})
 
-    async def delete_many(self, query: Dict[str, Any]) -> None:
-        await self.db.profiles.delete_many(query)
+    async def delete_inactive_for_user(self, user_id: int) -> None:
+        await self.db.profiles.delete_many({"user_id": user_id, "is_active": False})
 
-    async def get_last_by_user(self, user_id: int) -> Optional[Dict[str, Any]]:
-        return await self.db.profiles.find_one({"user_id": user_id}, sort=[("created_at", -1)])
+    async def delete_all_except(self, user_id: int, keep_uuid: str) -> None:
+        await self.db.profiles.delete_many({"user_id": user_id, "public_uuid": {"$ne": keep_uuid}})
 
-    async def get_pool_size(self, user_id: int, filters: Optional[Dict[str, Any]] = None) -> int:
+    async def get_last_by_user(self, user_id: int) -> Optional[Profile]:
+        doc = await self.db.profiles.find_one({"user_id": user_id}, sort=[("created_at", -1)])
+        return Profile.from_dict(doc) if doc else None
+
+    async def get_pool_size(self, user_id: int, filters: ProfileFilters) -> int:
         and_clauses = [{"user_id": {"$ne": user_id}}, {"is_active": True}]
-        if filters:
-            if filters.get("require_tags"): and_clauses.append({"tags": {"$all": filters["require_tags"]}})
-            if filters.get("exclude_tags"): and_clauses.append({"tags": {"$nin": filters["exclude_tags"]}})
-            if filters.get("any_tags"): and_clauses.append({"tags": {"$in": filters["any_tags"]}})
+        if filters.require_tags: and_clauses.append({"tags": {"$all": filters.require_tags}})
+        if filters.exclude_tags: and_clauses.append({"tags": {"$nin": filters.exclude_tags}})
+        if filters.any_tags: and_clauses.append({"tags": {"$in": filters.any_tags}})
         return await self.db.profiles.count_documents({"$and": and_clauses})
 
-    async def find_one_matching(self, query: Dict[str, Any], sort_args: List[Tuple[str, int]]) -> Optional[Dict[str, Any]]:
-        cursor = self.db.profiles.find(query).sort(sort_args).limit(1)
-        profiles = await cursor.to_list(length=1)
-        return profiles[0] if profiles else None
+    async def find_next_match(self, user_id: int, seen_uuids: List[str], filters: ProfileFilters, random_index: float, direction: int) -> Optional[Profile]:
+        and_clauses = [{"user_id": {"$ne": user_id}}, {"is_active": True}]
+        if filters.require_tags: and_clauses.append({"tags": {"$all": filters.require_tags}})
+        if filters.exclude_tags: and_clauses.append({"tags": {"$nin": filters.exclude_tags}})
+        if filters.any_tags: and_clauses.append({"tags": {"$in": filters.any_tags}})
 
-    async def get_all_by_user(self, user_id: int) -> List[Dict[str, Any]]:
-        return await self.db.profiles.find({"user_id": user_id}).to_list(length=100)
+        op = "$gte" if direction == 1 else "$lt"
+        sort_order = 1 if direction == 1 else -1
+
+        match = {"$and": and_clauses + [{"public_uuid": {"$nin": seen_uuids}}, {"random_index": {op: random_index}}]}
+        cursor = self.db.profiles.find(match).sort([("random_index", sort_order)]).limit(1)
+        profiles = await cursor.to_list(length=1)
+        return Profile.from_dict(profiles[0]) if profiles else None
+
+    async def get_all_by_user(self, user_id: int) -> List[Profile]:
+        docs = await self.db.profiles.find({"user_id": user_id}).to_list(length=100)
+        return [Profile.from_dict(d) for d in docs]
         
-    async def get_all_missing_random_index(self) -> List[Dict[str, Any]]:
-        return await self.db.profiles.find({"random_index": {"$exists": False}}).to_list(None)
+    async def get_all_missing_random_index(self) -> List[Profile]:
+        docs = await self.db.profiles.find({"random_index": {"$exists": False}}).to_list(None)
+        return [Profile.from_dict(d) for d in docs]
 
 
 class MongoContactRequestRepository(IContactRequestRepository):
     def __init__(self, mongo_db: MongoDatabase):
         self.db = mongo_db.db
 
-    async def create(self, request_doc: Dict[str, Any]) -> None:
-        await self.db.contact_requests.insert_one(request_doc)
+    async def create(self, request_model: ContactRequestModel) -> None:
+        await self.db.contact_requests.insert_one(request_model.to_dict())
 
-    async def get_by_req_id(self, req_id: str) -> Optional[Dict[str, Any]]:
-        return await self.db.contact_requests.find_one({"req_id": req_id})
+    async def get_by_req_id(self, req_id: str) -> Optional[ContactRequestModel]:
+        doc = await self.db.contact_requests.find_one({"req_id": req_id})
+        return ContactRequestModel.from_dict(doc) if doc else None
 
-    async def get_pending_by_initiator_target_action(self, initiator_id: int, target_id: int, action: str) -> Optional[Dict[str, Any]]:
-        return await self.db.contact_requests.find_one({"initiator_id": initiator_id, "target_id": target_id, "status": "pending", "action": action})
+    async def get_pending_by_initiator_target_action(self, initiator_id: int, target_id: int, action: str) -> Optional[ContactRequestModel]:
+        doc = await self.db.contact_requests.find_one({"initiator_id": initiator_id, "target_id": target_id, "status": "pending", "action": action})
+        return ContactRequestModel.from_dict(doc) if doc else None
 
-    async def update_status(self, req_id: str, status: str, extra_data: Optional[Dict[str, Any]] = None) -> None:
-        update = {"status": status}
-        if extra_data: update.update(extra_data)
-        await self.db.contact_requests.update_one({"req_id": req_id}, {"$set": update})
+    async def update(self, request_model: ContactRequestModel) -> None:
+        await self.db.contact_requests.replace_one({"req_id": request_model.req_id}, request_model.to_dict())
 
     async def count_pending_by_initiator(self, initiator_id: int) -> int:
         return await self.db.contact_requests.count_documents({"initiator_id": initiator_id, "status": "pending"})
@@ -198,27 +212,63 @@ class MongoContactRequestRepository(IContactRequestRepository):
         docs = await cursor.to_list(length=10)
         return [doc.get("action") for doc in docs if doc.get("action")]
 
-    async def get_pending_by_initiator(self, initiator_id: int) -> List[Dict[str, Any]]:
-        return await self.db.contact_requests.find({"initiator_id": initiator_id, "status": "pending"}).to_list(length=100)
+    async def get_pending_by_initiator(self, initiator_id: int) -> List[ContactRequestModel]:
+        docs = await self.db.contact_requests.find({"initiator_id": initiator_id, "status": "pending"}).to_list(length=100)
+        return [ContactRequestModel.from_dict(d) for d in docs]
 
-    async def get_pending_by_target(self, target_id: int) -> List[Dict[str, Any]]:
-        return await self.db.contact_requests.find({"target_id": target_id, "status": "pending"}).to_list(length=100)
+    async def get_pending_by_target(self, target_id: int) -> List[ContactRequestModel]:
+        docs = await self.db.contact_requests.find({"target_id": target_id, "status": "pending"}).to_list(length=100)
+        return [ContactRequestModel.from_dict(d) for d in docs]
 
 
 class MongoTagRepository(ITagRepository):
     def __init__(self, mongo_db: MongoDatabase):
         self.db = mongo_db.db
 
-    async def get_by_ids(self, tag_ids: List[str]) -> List[Dict[str, Any]]:
+    async def get_by_ids(self, tag_ids: List[str]) -> List[Tag]:
         if not tag_ids: return []
-        return await self.db.tags.find({"_id": {"$in": tag_ids}}).to_list(length=len(tag_ids))
+        docs = await self.db.tags.find({"_id": {"$in": tag_ids}}).to_list(length=len(tag_ids))
+        return [Tag.from_dict(d) for d in docs]
 
-    async def search(self, query: str, limit: int = 50) -> List[Dict[str, Any]]:
+    async def search(self, query: str, limit: int = 50) -> List[Tag]:
         if not query:
-            return await self.db.tags.find({"category": {"$nin": ["geo", "age", "language"]}}).to_list(length=limit)
+            docs = await self.db.tags.find({"category": {"$nin": ["geo", "age", "language"]}}).to_list(length=limit)
+            return [Tag.from_dict(d) for d in docs]
         
         q_lower = query.lower().strip()
         escaped_q = re.escape(q_lower)
         cursor = self.db.tags.find({"search_terms": {"$regex": f"^{escaped_q}"}})
         cursor = cursor.sort([("weight", -1), ("display.en", -1)]).limit(limit)
-        return await cursor.to_list(length=limit)
+        docs = await cursor.to_list(length=limit)
+        return [Tag.from_dict(d) for d in docs]
+
+
+class MongoAlbumRepository(IAlbumRepository):
+    def __init__(self, mongo_db: MongoDatabase):
+        self.db = mongo_db.db
+
+    async def is_processed(self, media_group_id: str) -> bool:
+        doc = await self.db.processed_albums.find_one({"media_group_id": media_group_id})
+        return bool(doc)
+
+    async def mark_processed(self, media_group_id: str) -> None:
+        await self.db.processed_albums.insert_one({
+            "media_group_id": media_group_id,
+            "created_at": datetime.datetime.now(datetime.timezone.utc)
+        })
+
+    async def add_to_buffer(self, media_group_id: str, media_item: MediaItem) -> List[MediaItem]:
+        res = await self.db.album_buffers.find_one_and_update(
+            {"media_group_id": media_group_id},
+            {"$push": {"media": media_item.to_dict()}},
+            upsert=True,
+            return_document=True
+        )
+        return [MediaItem.from_dict(m) for m in res.get("media", [])]
+
+    async def get_and_clear_buffer(self, media_group_id: str) -> List[MediaItem]:
+        doc = await self.db.album_buffers.find_one_and_delete({"media_group_id": media_group_id})
+        return [MediaItem.from_dict(m) for m in doc.get("media", [])] if doc else []
+
+    async def clear_buffer(self, media_group_id: str) -> None:
+        await self.db.album_buffers.delete_one({"media_group_id": media_group_id})

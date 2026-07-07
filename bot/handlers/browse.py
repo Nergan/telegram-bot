@@ -32,7 +32,7 @@ async def browse_next(
         target, all_seen = await browse_service.get_next_profile(user_id, active)
         
         if not target:
-            pool_size = await profile_service.get_pool_size(user_id, active.get("filters", {}))
+            pool_size = await profile_service.get_pool_size(user_id, active.filters)
             return await message.answer(_("browse_none", lang), reply_markup=main_menu_kb(lang, pool_size))
             
         if all_seen:
@@ -40,13 +40,13 @@ async def browse_next(
             
         await message.answer(_("browsing", lang), reply_markup=browse_kb(lang))
         
-        target_uuid = target.get('public_uuid', '')
-        target_id = target.get('user_id', 0)
+        target_uuid = target.public_uuid
+        target_id = target.user_id
         
         pending_actions = await contact_req_service.get_pending_actions(user_id, target_id)
         
-        private_contacts = [c for c in active.get("contacts", []) if not c.get("is_public")]
-        target_private_contacts = [c for c in target.get("contacts", []) if not c.get("is_public")]
+        private_contacts = [c for c in active.contacts if not c.is_public]
+        target_private_contacts = [c for c in target.contacts if not c.is_public]
         
         await send_profile(
             message.chat.id, 
@@ -92,7 +92,7 @@ async def init_contact_inline(
     has_msg = action_type.endswith("msg")
     db_action = "send" if is_send else "req"
     
-    if await contact_req_service.has_pending_request(callback.from_user.id, target_prof['user_id'], db_action):
+    if await contact_req_service.has_pending_request(callback.from_user.id, target_prof.user_id, db_action):
         req_type_str = _("str_oneway", lang) if db_action == "send" else _("str_mutual", lang)
         return await callback.answer(_("alert_already_req", lang, req_type_str), show_alert=True)
     
@@ -125,7 +125,7 @@ async def show_contact_selection(event: types.CallbackQuery | types.Message, sta
     data = await state.get_data()
     action = data.get("action")
     
-    private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
+    private_contacts = [c for c in active_prof.contacts if not c.is_public]
     
     if not private_contacts and action == "req":
         await state.clear()
@@ -139,7 +139,7 @@ async def show_contact_selection(event: types.CallbackQuery | types.Message, sta
         
     selected_ids = data.get("selected_contact_ids", [])
     if not selected_ids and private_contacts:
-        selected_ids = [private_contacts[0]["id"]]
+        selected_ids = [private_contacts[0].id]
         await state.update_data(selected_contact_ids=selected_ids)
         
     kb = contact_share_selection_kb(lang, private_contacts, selected_ids, action)
@@ -173,7 +173,7 @@ async def toggle_share_selection(callback: types.CallbackQuery, state: FSMContex
         
     await state.update_data(selected_contact_ids=selected_ids)
     
-    private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
+    private_contacts = [c for c in active_prof.contacts if not c.is_public]
     await callback.message.edit_reply_markup(
         reply_markup=contact_share_selection_kb(lang, private_contacts, selected_ids, action)
     )
@@ -194,7 +194,7 @@ async def confirm_share_contacts_cb(
         await state.clear()
         return await callback.answer(_("menu_no_active", lang), show_alert=True)
         
-    shared_contacts = [c["value"] for c in active_prof.get("contacts", []) if c["id"] in selected_ids]
+    shared_contacts = [c.value for c in active_prof.contacts if c.id in selected_ids]
     
     if action == "req" and not shared_contacts:
         return await callback.answer(_("err_mut_min", lang), show_alert=True)
@@ -204,26 +204,26 @@ async def confirm_share_contacts_cb(
             return await callback.answer(_("err_mut_req", lang), show_alert=True)
             
         req = await contact_req_service.get_request(accepting_req_id)
-        if not req or req['status'] != 'pending':
+        if not req or req.status != 'pending':
             await state.clear()
             return await callback.answer(_("req_expired", lang), show_alert=True)
             
-        initiator_prof = await profile_service.get_active_profile(req['initiator_id'])
+        initiator_prof = await profile_service.get_active_profile(req.initiator_id)
         if not initiator_prof:
             await state.clear()
             return await callback.answer(_("prof_not_found", lang), show_alert=True)
             
-        await contact_req_service.update_status(accepting_req_id, "accepted", {"target_shared_contacts": shared_contacts})
+        await contact_req_service.update_status(accepting_req_id, "accepted", shared_contacts)
         
-        init_lang = await user_service.get_lang(req['initiator_id'])
+        init_lang = await user_service.get_lang(req.initiator_id)
         try:
-            await send_profile(req['initiator_id'], active_prof, kb=None, lang=init_lang, tag_service=tag_service, custom_prefix=_("lbl_exchanged", init_lang))
+            await send_profile(req.initiator_id, active_prof, kb=None, lang=init_lang, tag_service=tag_service, custom_prefix=_("lbl_exchanged", init_lang))
             contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_contacts)
-            await bot.send_message(req['initiator_id'], _("mut_accepted", init_lang, contacts_text))
+            await bot.send_message(req.initiator_id, _("mut_accepted", init_lang, contacts_text))
         except Exception as e:
-            logger.warning(f"Could not notify request initiator {req['initiator_id']}: {e}")
+            logger.warning(f"Could not notify request initiator {req.initiator_id}: {e}")
             
-        initiator_shared = req.get("shared_contacts", [])
+        initiator_shared = req.shared_contacts
         if initiator_shared:
             try:
                 await send_profile(callback.from_user.id, initiator_prof, kb=None, lang=lang, tag_service=tag_service, custom_prefix=_("lbl_exchanged", lang))
@@ -252,7 +252,7 @@ async def confirm_share_contacts_cb(
             await state.clear()
             return
             
-        if await contact_req_service.has_pending_request(callback.from_user.id, target_prof['user_id'], action):
+        if await contact_req_service.has_pending_request(callback.from_user.id, target_prof.user_id, action):
             try:
                 await callback.message.delete()
             except Exception:
@@ -263,9 +263,9 @@ async def confirm_share_contacts_cb(
             return
             
         msg_text = data.get("message_text")
-        req_id = await contact_req_service.create_request(callback.from_user.id, target_prof['user_id'], action, msg_text, shared_contacts)
+        req_id = await contact_req_service.create_request(callback.from_user.id, target_prof.user_id, action, msg_text, shared_contacts)
         
-        target_lang = await user_service.get_lang(target_prof['user_id'])
+        target_lang = await user_service.get_lang(target_prof.user_id)
         success = False
         try:
             if action == "send":
@@ -273,15 +273,15 @@ async def confirm_share_contacts_cb(
                 if msg_text: prefix += _("notif_msg", target_lang, html.escape(msg_text))
                 if shared_contacts: prefix += _("notif_send_priv", target_lang)
                 prefix += _("notif_send_footer", target_lang)
-                await send_profile(target_prof['user_id'], active_prof, None, target_lang, tag_service, custom_prefix=prefix)
+                await send_profile(target_prof.user_id, active_prof, None, target_lang, tag_service, custom_prefix=prefix)
             else:
                 prefix = _("notif_mut", target_lang)
                 if msg_text: prefix += _("notif_msg", target_lang, html.escape(msg_text))
                 prefix += _("notif_mut_footer", target_lang)
-                await send_profile(target_prof['user_id'], active_prof, contact_decision_kb(target_lang, req_id), target_lang, tag_service, custom_prefix=prefix)
+                await send_profile(target_prof.user_id, active_prof, contact_decision_kb(target_lang, req_id), target_lang, tag_service, custom_prefix=prefix)
             success = True
         except Exception as e:
-            logger.warning(f"Failed to transmit request notification to recipient user {target_prof['user_id']}: {e}")
+            logger.warning(f"Failed to transmit request notification to recipient user {target_prof.user_id}: {e}")
             success = False
         
         try:
@@ -338,7 +338,7 @@ async def contact_decisions(
     req_id = parts[1]
     
     req = await contact_req_service.get_request(req_id)
-    if not req or req['status'] != 'pending':
+    if not req or req.status != 'pending':
         return await callback.answer(_("req_expired", lang), show_alert=True)
         
     if decision == "decline":
@@ -353,7 +353,7 @@ async def contact_decisions(
         if not active_prof:
             return await callback.answer(_("menu_no_active", lang), show_alert=True)
             
-        private_contacts = [c for c in active_prof.get("contacts", []) if not c.get("is_public")]
+        private_contacts = [c for c in active_prof.contacts if not c.is_public]
         if not private_contacts:
             return await callback.answer(_("con_add_instr", lang), show_alert=True)
             
@@ -361,10 +361,10 @@ async def contact_decisions(
             
         await state.update_data(
             accepting_req_id=req_id, action="accept",
-            selected_contact_ids=[private_contacts[0]["id"]]
+            selected_contact_ids=[private_contacts[0].id]
         )
         await state.set_state(ContactRequest.selecting_contacts)
         
-        kb = contact_share_selection_kb(lang, private_contacts, [private_contacts[0]["id"]], action="accept")
+        kb = contact_share_selection_kb(lang, private_contacts, [private_contacts[0].id], action="accept")
         await callback.message.answer(_("mut_select_accept", lang), reply_markup=kb)
         await callback.answer()
