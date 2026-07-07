@@ -282,7 +282,7 @@ async def confirm_share_contacts_cb(
             success = True
         except Exception as e:
             logger.warning(f"Failed to transmit request notification to recipient user {target_prof['user_id']}: {e}")
-            success = True
+            success = False
         
         try:
             await callback.message.delete()

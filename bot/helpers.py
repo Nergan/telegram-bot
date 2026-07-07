@@ -1,6 +1,6 @@
 import html
 import logging
-from aiogram.types import LinkPreviewOptions, InputMediaPhoto, InputMediaVideo
+from aiogram.types import LinkPreviewOptions, InputMediaPhoto, InputMediaVideo, InputMediaAudio, InputMediaDocument
 from bot.bot_setup import bot
 from infrastructure.locales import _
 from application.services import TagService
@@ -63,6 +63,8 @@ async def send_profile(chat_id: int, profile: dict, kb, lang: str, tag_service: 
                 cap = final_text if i == 0 else None
                 if m['type'] == 'photo': media_group.append(InputMediaPhoto(media=m['file_id'], caption=cap))
                 elif m['type'] == 'video': media_group.append(InputMediaVideo(media=m['file_id'], caption=cap))
+                elif m['type'] == 'audio': media_group.append(InputMediaAudio(media=m['file_id'], caption=cap))
+                elif m['type'] == 'document': media_group.append(InputMediaDocument(media=m['file_id'], caption=cap))
             
             if len(media_group) >= 2:
                 await bot.send_media_group(chat_id, media=media_group)
@@ -71,8 +73,12 @@ async def send_profile(chat_id: int, profile: dict, kb, lang: str, tag_service: 
                 m_item = media_group[0]
                 if isinstance(m_item, InputMediaPhoto):
                     await bot.send_photo(chat_id, m_item.media, caption=final_text, reply_markup=kb)
-                else:
+                elif isinstance(m_item, InputMediaVideo):
                     await bot.send_video(chat_id, m_item.media, caption=final_text, reply_markup=kb)
+                elif isinstance(m_item, InputMediaAudio):
+                    await bot.send_audio(chat_id, m_item.media, caption=final_text, reply_markup=kb)
+                else:
+                    await bot.send_document(chat_id, m_item.media, caption=final_text, reply_markup=kb)
             else:
                 final_text = truncate(text, 4000)
                 await bot.send_message(chat_id, final_text, reply_markup=kb, link_preview_options=opts)
