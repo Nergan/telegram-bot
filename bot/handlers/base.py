@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 from bot.states import ProfileSetup
 from bot.keyboards import main_menu_kb, profile_inline_kb
 from bot.helpers import send_profile
-from infrastructure.locales import _, _btn
+from application.locales import _, _btn
 from application.services import UserService, ProfileService, ContactRequestService, TagService, AlbumService
 
 router = Router()

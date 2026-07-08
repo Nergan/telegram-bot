@@ -9,7 +9,7 @@ from bot.keyboards import (
     contact_share_selection_kb, contact_decision_kb
 )
 from bot.helpers import send_profile
-from infrastructure.locales import _, _btn
+from application.locales import _, _btn
 from application.services import UserService, ProfileService, BrowseService, ContactRequestService, TagService
 
 router = Router()

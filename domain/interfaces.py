@@ -124,3 +124,14 @@ class IAlbumRepository(ABC):
     
     @abstractmethod
     async def clear_buffer(self, media_group_id: str) -> None: pass
+
+class INotificationService(ABC):
+    @abstractmethod
+    async def notify_text(self, user_id: int, text: str) -> None: pass
+    
+    @abstractmethod
+    async def notify_profile(self, user_id: int, profile: Profile, lang: str, custom_prefix: str = "") -> None: pass
+
+class ISecurityService(ABC):
+    @abstractmethod
+    def validate_webapp_data(self, init_data: str) -> Optional[dict]: pass

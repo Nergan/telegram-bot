@@ -6,12 +6,14 @@ from fastapi import FastAPI, Request, HTTPException
 from aiogram import Dispatcher
 from aiogram.types import Update
 
-from infrastructure.config import WEBHOOK_URL, WEBHOOK_SECRET, MONGODB_URI
+from application.config import WEBHOOK_URL, WEBHOOK_SECRET, MONGODB_URI
 from infrastructure.database.mongo_repository import (
     MongoDatabase, MongoUserRepository, MongoProfileRepository, 
     MongoContactRequestRepository, MongoTagRepository, MongoAlbumRepository
 )
 from infrastructure.bot.storage import MongoFSMStorage
+from infrastructure.security import TelegramSecurityService
+from bot.notification import TelegramNotificationService
 from application.services import (
     UserService, ProfileService, BrowseService, 
     ContactRequestService, TagService, AlbumService
@@ -38,8 +40,6 @@ contact_req_service = ContactRequestService(req_repo)
 tag_service = TagService(tag_repo)
 album_service = AlbumService(album_repo)
 
-# Notice how we completely removed Mongo injection into the handlers.
-# All operations are abstracted exclusively behind the robust Application layer services.
 dp = Dispatcher(
     storage=MongoFSMStorage(mongo_db),
     user_service=user_service,
@@ -95,10 +95,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+security_service = TelegramSecurityService()
+notification_service = TelegramNotificationService(tag_service)
+
 app.state.user_service = user_service
 app.state.profile_service = profile_service
 app.state.tag_service = tag_service
 app.state.contact_req_service = contact_req_service
+app.state.security_service = security_service
+app.state.notification_service = notification_service
 
 app.include_router(webapp_router)
 

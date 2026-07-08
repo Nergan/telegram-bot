@@ -6,7 +6,7 @@ from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from bot.states import ProfileSetup
 from bot.keyboards import edit_info_menu_kb, cancel_fsm_kb, manage_contacts_inline_kb
-from infrastructure.locales import _, _btn
+from application.locales import _, _btn
 from application.services import ProfileService
 from domain.models import Contact
 
@@ -107,7 +107,7 @@ async def capture_new_contact(message: types.Message, state: FSMContext, lang: s
 @router.callback_query(F.data.startswith("togglecon_"))
 async def toggle_contact_visibility(callback: types.CallbackQuery, lang: str, profile_service: ProfileService):
     cid = callback.data.replace("togglecon_", "", 1)
-    active_prof = await profile_service.get_active_profile(callback.from_user.id)
+    active_prof = await profile_service.get_active_profile(callback.fromuser.id)
     if not active_prof: return await callback.answer(_("prof_not_found", lang), show_alert=True)
     
     updated = False

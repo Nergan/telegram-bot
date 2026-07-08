@@ -2,8 +2,8 @@ import time
 from aiogram import BaseMiddleware
 from aiogram.types import Update
 from application.services import UserService
-from infrastructure.locales import _
-from infrastructure.config import DATA_SPEED_LIMIT, KEYBOARD_SPEED_LIMIT
+from application.locales import _
+from application.config import DATA_SPEED_LIMIT, KEYBOARD_SPEED_LIMIT
 
 THROTTLE_STORE = {}
 

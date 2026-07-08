@@ -2,7 +2,7 @@ import html
 import logging
 from aiogram.types import LinkPreviewOptions, InputMediaPhoto, InputMediaVideo, InputMediaAudio, InputMediaDocument
 from bot.bot_setup import bot
-from infrastructure.locales import _
+from application.locales import _
 from application.services import TagService
 from domain.models import Profile
 

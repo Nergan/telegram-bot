@@ -1,6 +1,6 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
-from infrastructure.config import WEBHOOK_URL
-from infrastructure.locales import _
+from application.config import WEBHOOK_URL
+from application.locales import _
 from typing import List
 from domain.models import Contact
 

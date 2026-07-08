@@ -3,36 +3,36 @@ import hashlib
 import json
 import time
 from urllib.parse import parse_qsl
-from infrastructure.config import TOKEN
+from domain.interfaces import ISecurityService
+from application.config import TOKEN
+from typing import Optional
 
-def validate_webapp_data(init_data: str) -> dict | None:
-    try:
-        parsed_data = dict(parse_qsl(init_data, keep_blank_values=True))
-        user_json_str = parsed_data.get('user', '{}')
-        
-        # Immediate fallback if no hash is provided
-        if 'hash' not in parsed_data:
-            return None
+class TelegramSecurityService(ISecurityService):
+    def validate_webapp_data(self, init_data: str) -> Optional[dict]:
+        try:
+            parsed_data = dict(parse_qsl(init_data, keep_blank_values=True))
+            user_json_str = parsed_data.get('user', '{}')
             
-        hash_val = parsed_data.pop('hash')
-        
-        # Expired authentication checks (drop payload immediately if older than 24 hours)
-        auth_date_str = parsed_data.get('auth_date')
-        if auth_date_str:
-            if time.time() - float(auth_date_str) > 86400:
+            if 'hash' not in parsed_data:
                 return None
-        else:
-            return None
+                
+            hash_val = parsed_data.pop('hash')
             
-        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
-        secret_key = hmac.new(b"WebAppData", TOKEN.encode(), hashlib.sha256).digest()
-        calc_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+            auth_date_str = parsed_data.get('auth_date')
+            if auth_date_str:
+                if time.time() - float(auth_date_str) > 86400:
+                    return None
+            else:
+                return None
+                
+            data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
+            secret_key = hmac.new(b"WebAppData", TOKEN.encode(), hashlib.sha256).digest()
+            calc_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+            
+            if hmac.compare_digest(calc_hash, hash_val):
+                return json.loads(user_json_str)
+                
+        except Exception:
+            pass
         
-        # Prevent timing attacks and strictly drop bad payloads
-        if hmac.compare_digest(calc_hash, hash_val):
-            return json.loads(user_json_str)
-            
-    except Exception:
-        pass
-    
-    return None
+        return None

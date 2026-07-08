@@ -7,7 +7,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from bot.states import ProfileSetup
 from bot.keyboards import edit_info_menu_kb, edit_fsm_kb, profiles_menu_kb, manage_action_kb, profile_inline_kb
 from bot.helpers import send_profile
-from infrastructure.locales import _, _btn
+from application.locales import _, _btn
 from application.services import ProfileService, ContactRequestService, TagService, AlbumService
 from domain.models import MediaItem
 

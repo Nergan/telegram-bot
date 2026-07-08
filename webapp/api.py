@@ -5,10 +5,8 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from infrastructure.security import validate_webapp_data
-from bot.bot_setup import bot
-from bot.helpers import send_profile
-from infrastructure.locales import _
+from domain.interfaces import INotificationService, ISecurityService
+from application.locales import _
 from application.services import UserService, ProfileService, TagService, ContactRequestService
 
 router = APIRouter()
@@ -18,6 +16,8 @@ def get_user_svc(request: Request) -> UserService: return request.app.state.user
 def get_profile_svc(request: Request) -> ProfileService: return request.app.state.profile_service
 def get_tag_svc(request: Request) -> TagService: return request.app.state.tag_service
 def get_req_svc(request: Request) -> ContactRequestService: return request.app.state.contact_req_service
+def get_notif_svc(request: Request) -> INotificationService: return request.app.state.notification_service
+def get_security_svc(request: Request) -> ISecurityService: return request.app.state.security_service
 
 class WebAppPayload(BaseModel):
     initData: str
@@ -55,9 +55,10 @@ async def get_profile_data(
     payload: WebAppPayload, 
     user_service: UserService = Depends(get_user_svc),
     profile_service: ProfileService = Depends(get_profile_svc),
-    tag_service: TagService = Depends(get_tag_svc)
+    tag_service: TagService = Depends(get_tag_svc),
+    security_service: ISecurityService = Depends(get_security_svc)
 ):
-    user_data = validate_webapp_data(payload.initData)
+    user_data = security_service.validate_webapp_data(payload.initData)
     if not user_data: raise HTTPException(status_code=401)
     if await user_service.is_banned(user_data['id']): raise HTTPException(status_code=403, detail="Banned")
     
@@ -86,9 +87,10 @@ async def get_profile_data(
 async def search_tags_endpoint(
     payload: TagSearchPayload, 
     user_service: UserService = Depends(get_user_svc),
-    tag_service: TagService = Depends(get_tag_svc)
+    tag_service: TagService = Depends(get_tag_svc),
+    security_service: ISecurityService = Depends(get_security_svc)
 ):
-    user_data = validate_webapp_data(payload.initData)
+    user_data = security_service.validate_webapp_data(payload.initData)
     if not user_data: raise HTTPException(status_code=401)
     if await user_service.is_banned(user_data['id']): raise HTTPException(status_code=403, detail="Banned")
     
@@ -100,9 +102,11 @@ async def search_tags_endpoint(
 async def update_tags(
     payload: WebAppPayload,
     user_service: UserService = Depends(get_user_svc),
-    profile_service: ProfileService = Depends(get_profile_svc)
+    profile_service: ProfileService = Depends(get_profile_svc),
+    security_service: ISecurityService = Depends(get_security_svc),
+    notif_svc: INotificationService = Depends(get_notif_svc)
 ):
-    user_data = validate_webapp_data(payload.initData)
+    user_data = security_service.validate_webapp_data(payload.initData)
     if not user_data: raise HTTPException(status_code=401)
     
     user_id = user_data['id']
@@ -118,7 +122,7 @@ async def update_tags(
         p.tags = payload.tags
         await profile_service.update_profile(p)
         msg = "✅ Tags successfully updated!" if lang == "en" else "✅ Tags atualizadas com sucesso!" if lang == "pt" else "✅ Теги успешно обновлены!"
-        try: await bot.send_message(user_id, msg)
+        try: await notif_svc.notify_text(user_id, msg)
         except Exception: pass
     else:
         p.filters.require_tags = payload.require_tags
@@ -126,7 +130,7 @@ async def update_tags(
         p.filters.any_tags = payload.any_tags
         await profile_service.update_profile(p)
         msg = "✅ Filters successfully updated!" if lang == "en" else "✅ Filtros atualizados com sucesso!" if lang == "pt" else "✅ Фильтры успешно обновлены!"
-        try: await bot.send_message(user_id, msg)
+        try: await notif_svc.notify_text(user_id, msg)
         except Exception: pass
         
     return {"status": "ok"}
@@ -137,10 +141,11 @@ async def get_requests_endpoint(
     user_service: UserService = Depends(get_user_svc),
     profile_service: ProfileService = Depends(get_profile_svc),
     tag_service: TagService = Depends(get_tag_svc),
-    contact_req_service: ContactRequestService = Depends(get_req_svc)
+    contact_req_service: ContactRequestService = Depends(get_req_svc),
+    security_service: ISecurityService = Depends(get_security_svc)
 ):
     try:
-        user_data = validate_webapp_data(payload.initData)
+        user_data = security_service.validate_webapp_data(payload.initData)
         if not user_data: raise HTTPException(status_code=401)
             
         user_id = user_data['id']
@@ -192,10 +197,12 @@ async def handle_request_endpoint(
     user_service: UserService = Depends(get_user_svc),
     profile_service: ProfileService = Depends(get_profile_svc),
     tag_service: TagService = Depends(get_tag_svc),
-    contact_req_service: ContactRequestService = Depends(get_req_svc)
+    contact_req_service: ContactRequestService = Depends(get_req_svc),
+    security_service: ISecurityService = Depends(get_security_svc),
+    notif_svc: INotificationService = Depends(get_notif_svc)
 ):
     try:
-        user_data = validate_webapp_data(payload.initData)
+        user_data = security_service.validate_webapp_data(payload.initData)
         if not user_data: raise HTTPException(status_code=401)
             
         user_id = user_data['id']
@@ -210,7 +217,7 @@ async def handle_request_endpoint(
         if payload.action == "decline":
             if req.target_id != user_id or req.status != 'pending': raise HTTPException(status_code=403)
             await contact_req_service.update_status(payload.req_id, "declined")
-            try: await bot.send_message(req.initiator_id, _("mut_declined", init_lang))
+            try: await notif_svc.notify_text(req.initiator_id, _("mut_declined", init_lang))
             except Exception: pass
             return {"status": "ok"}
             
@@ -239,23 +246,23 @@ async def handle_request_endpoint(
             await contact_req_service.update_status(payload.req_id, "accepted", shared_values)
             
             try:
-                await send_profile(req.initiator_id, active_prof, None, init_lang, tag_service, custom_prefix=_("lbl_exchanged", init_lang))
+                await notif_svc.notify_profile(req.initiator_id, active_prof, init_lang, custom_prefix=_("lbl_exchanged", init_lang))
                 contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in shared_values)
-                await bot.send_message(req.initiator_id, _("mut_accepted", init_lang, contacts_text))
+                await notif_svc.notify_text(req.initiator_id, _("mut_accepted", init_lang, contacts_text))
             except Exception as e:
                 logger.warning(f"Could not notify initiator {req.initiator_id} of request completion: {e}")
             
             initiator_shared = req.shared_contacts
             if initiator_shared:
                 try:
-                    await send_profile(user_id, initiator_prof, None, tgt_lang, tag_service, custom_prefix=_("lbl_exchanged", tgt_lang))
+                    await notif_svc.notify_profile(user_id, initiator_prof, tgt_lang, custom_prefix=_("lbl_exchanged", tgt_lang))
                     init_contacts_text = "\n".join(f"• <code>{html.escape(v)}</code>" for v in initiator_shared)
-                    await bot.send_message(user_id, _("mut_complete", tgt_lang, init_contacts_text))
+                    await notif_svc.notify_text(user_id, _("mut_complete", tgt_lang, init_contacts_text))
                 except Exception as e:
                     logger.warning(f"Could not deliver initiator profile/contacts to acceptor {user_id}: {e}")
             else:
                 try:
-                    await bot.send_message(user_id, "✅ Exchange complete.")
+                    await notif_svc.notify_text(user_id, "✅ Exchange complete.")
                 except Exception as e:
                     logger.warning(f"Could not notify acceptor {user_id} of completion confirmation: {e}")
             return {"status": "ok"}
@@ -273,10 +280,12 @@ async def send_profile_to_chat_endpoint(
     user_service: UserService = Depends(get_user_svc),
     profile_service: ProfileService = Depends(get_profile_svc),
     tag_service: TagService = Depends(get_tag_svc),
-    contact_req_service: ContactRequestService = Depends(get_req_svc)
+    contact_req_service: ContactRequestService = Depends(get_req_svc),
+    security_service: ISecurityService = Depends(get_security_svc),
+    notif_svc: INotificationService = Depends(get_notif_svc)
 ):
     try:
-        user_data = validate_webapp_data(payload.initData)
+        user_data = security_service.validate_webapp_data(payload.initData)
         if not user_data: raise HTTPException(status_code=401)
         
         user_id = user_data['id']
@@ -293,7 +302,7 @@ async def send_profile_to_chat_endpoint(
         if not profile_to_send: raise HTTPException(status_code=404, detail="Target profile no longer exists.")
         
         lang = await user_service.get_lang(user_id)
-        await send_profile(user_id, profile_to_send, None, lang, tag_service)
+        await notif_svc.notify_profile(user_id, profile_to_send, lang)
         
         return {"status": "ok"}
     except HTTPException:
