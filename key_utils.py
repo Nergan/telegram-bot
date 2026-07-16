@@ -45,3 +45,11 @@ def get_user_id_from_private_key(private_pem: str):
         return user_id
     except Exception:
         return None
+
+def get_pem_and_user_id_from_private_key_string(private_pem: str):
+    """Parses a private key string to output all parameters simultaneously"""
+    private_key = serialization.load_pem_private_key(
+        private_pem.encode('utf-8'),
+        password=None
+    )
+    return get_pem_and_user_id(private_key)

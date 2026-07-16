@@ -5,11 +5,17 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 
 from .config import settings
 from .handlers import router as main_router
+from .vault import init_vault
 
 async def on_startup(bot: Bot):
-    webhook_url = f"{settings.webhook_base_url.rstrip('/')}/webhook"
-    await bot.set_webhook(webhook_url)
-    logging.info(f"Webhook configured at: {webhook_url}")
+    await init_vault()
+    webhook_url = settings.resolved_webhook_url
+    if not webhook_url:
+        raise ValueError("Webhook URL is empty. Must set WEBHOOK_BASE_URL or RENDER_EXTERNAL_URL.")
+        
+    formatted_webhook = f"{webhook_url.rstrip('/')}/webhook"
+    await bot.set_webhook(formatted_webhook)
+    logging.info(f"Webhook configured at: {formatted_webhook}")
 
 async def health_check(request):
     return web.Response(text="OK", status=200)
