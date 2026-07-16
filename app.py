@@ -1,6 +1,7 @@
 import logging
 from aiohttp import web
 from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from config import settings
@@ -16,6 +17,13 @@ async def on_startup(bot: Bot):
         
     formatted_webhook = f"{webhook_url.rstrip('/')}/webhook"
     await bot.set_webhook(formatted_webhook)
+    
+    # Push command menu natively to Telegram UI
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Open main menu"),
+        BotCommand(command="help", description="Show help info"),
+        BotCommand(command="language", description="Change bot language"),
+    ])
     logging.info(f"Webhook configured at: {formatted_webhook}")
 
 async def health_check(request):
@@ -26,22 +34,18 @@ def setup_bot_app():
     app = web.Application()
     app.router.add_get("/health", health_check)
 
-    # Graceful fallback if secrets are missing during Render build phase
     if not settings.telegram_bot_token:
         logging.error("TELEGRAM_BOT_TOKEN is missing! Starting dummy web server for Render health checks.")
         return app
 
-    # Setup Aiogram Bot and Dispatcher
     bot = Bot(token=settings.telegram_bot_token)
     dp = Dispatcher()
     dp.include_router(main_router)
     dp.startup.register(on_startup)
 
-    # Create the webhook request handler
     handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     handler.register(app, path="/webhook")
     
-    # Mount the Aiogram handler to the web app
     setup_application(app, dp, bot=bot)
     
     return app

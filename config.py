@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     @property
     def resolved_webhook_url(self) -> str:
         return self.webhook_base_url or os.environ.get("RENDER_EXTERNAL_URL", "")
+        
+    @property
+    def web_app_url(self) -> str:
+        # Dynamically extract the frontend root URL from the API URL
+        base = self.netlazy_api_url.replace('/netlazy/api', '').replace('/api', '')
+        return base if base else "https://netlazy.hf.space"
     
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -2,6 +2,24 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 import hashlib
+import textwrap
+
+def strip_pem(pem_str: str) -> str:
+    """Strips PEM headers/footers and newlines for clean Telegram display."""
+    return pem_str.replace("-----BEGIN PRIVATE KEY-----", "") \
+                  .replace("-----END PRIVATE KEY-----", "") \
+                  .replace("\r", "") \
+                  .replace("\n", "") \
+                  .strip()
+
+def restore_pem(key_str: str) -> str:
+    """Restores standard PEM formatting if a user pastes a stripped key."""
+    if "BEGIN PRIVATE KEY" in key_str:
+        return key_str
+    
+    cleaned = key_str.replace("\r", "").replace("\n", "").replace(" ", "").strip()
+    lines = "\n".join(textwrap.wrap(cleaned, 64))
+    return f"-----BEGIN PRIVATE KEY-----\n{lines}\n-----END PRIVATE KEY-----"
 
 def get_pem_and_user_id(private_key):
     """Derives public key, PEM strings, and user_id from a private key object."""

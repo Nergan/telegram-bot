@@ -1,38 +1,40 @@
 import httpx
-from aiogram import Router
-from aiogram.types import Message
-from aiogram.filters import Command
+from aiogram import Router, F
+from aiogram.types import CallbackQuery, WebAppInfo
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from api_client import NetlazyAPI
 from vault import get_key
+from config import settings
 
 router = Router()
 
-@router.message(Command("myprofile"))
-async def cmd_myprofile(message: Message):
-    if message.chat.type != "private":
-        await message.answer("This only works in a private chat with me.")
-        return
-        
-    key_data = await get_key(message.from_user.id)
+@router.callback_query(F.data == "menu_profile")
+async def callback_profile(call: CallbackQuery):
+    key_data = await get_key(call.from_user.id)
     if not key_data:
-        await message.answer("You are not logged in. Use /start or /login.")
+        await call.answer("You are not logged in.", show_alert=True)
         return
         
     api = NetlazyAPI(key_data["user_id"], key_data["private_pem"])
     try:
         profile = await api.get_profile()
         
-        bio = profile.get('bio', 'No bio yet.')
+        bio = profile.get('bio', '') or 'No bio yet.'
         tags = ", ".join(profile.get('tags', [])) or "No tags."
         
         response_text = (
-            f"**Your Profile**\n\n"
-            f"**Bio:** {bio}\n"
-            f"**Tags:** {tags}\n"
+            f"👤 **Your Profile**\n\n"
+            f"**Bio:**\n{bio}\n\n"
+            f"**Tags:**\n{tags}\n"
         )
         
-        await message.answer(response_text, parse_mode="Markdown")
+        builder = InlineKeyboardBuilder()
+        builder.button(text="✏️ Edit in Web App", web_app=WebAppInfo(url=settings.web_app_url))
+        builder.button(text="🔙 Back", callback_data="menu_main")
+        builder.adjust(1)
+        
+        await call.message.edit_text(response_text, parse_mode="Markdown", reply_markup=builder.as_markup())
     except httpx.RequestError:
-        await message.answer("The service is waking up, please try again in a few seconds.")
+        await call.answer("Service waking up, try again in a few seconds.", show_alert=True)
     except Exception:
-        await message.answer("Could not fetch your profile. Are you logged in? Use /start or /login.")
+        await call.answer("Failed to load profile.", show_alert=True)
