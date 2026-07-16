@@ -2,8 +2,8 @@ import httpx
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
-from ..api_client import NetlazyAPI
-from ..vault import get_key
+from api_client import NetlazyAPI
+from vault import get_key
 
 router = Router()
 

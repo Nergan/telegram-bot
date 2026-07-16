@@ -3,9 +3,9 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
-from .config import settings
-from .handlers import router as main_router
-from .vault import init_vault
+from config import settings
+from handlers import router as main_router
+from vault import init_vault
 
 async def on_startup(bot: Bot):
     await init_vault()

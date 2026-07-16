@@ -7,7 +7,7 @@ import asyncio
 from urllib.parse import urlencode
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes, serialization
-from .config import settings
+from config import settings
 
 class NetlazyAPI:
     def __init__(self, user_id: str, private_key_pem: str):

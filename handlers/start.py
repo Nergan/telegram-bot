@@ -5,9 +5,9 @@ from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from ..api_client import NetlazyAPI
-from .. import key_utils
-from ..vault import get_key, save_key, delete_key
+from api_client import NetlazyAPI
+import key_utils
+from vault import get_key, save_key, delete_key
 
 router = Router()
 
