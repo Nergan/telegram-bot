@@ -1,0 +1,47 @@
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes
+import hashlib
+
+def get_pem_and_user_id(private_key):
+    """Derives public key, PEM strings, and user_id from a private key object."""
+    public_key = private_key.public_key()
+
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    ).decode('utf-8')
+
+    public_pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode('utf-8')
+
+    public_der = public_key.public_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    user_id = hashlib.sha256(public_der).hexdigest()
+
+    return private_pem, public_pem, user_id
+
+def generate_keypair():
+    """Generates a new RSA keypair and derives associated data."""
+    private_key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048
+    )
+    return get_pem_and_user_id(private_key)
+
+def get_user_id_from_private_key(private_pem: str):
+    """Loads a private key from PEM and derives its user_id."""
+    try:
+        private_key = serialization.load_pem_private_key(
+            private_pem.encode('utf-8'),
+            password=None
+        )
+        _, _, user_id = get_pem_and_user_id(private_key)
+        return user_id
+    except Exception:
+        return None
